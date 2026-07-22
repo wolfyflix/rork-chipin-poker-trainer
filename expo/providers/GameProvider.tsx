@@ -17,6 +17,8 @@ export interface ArenaHighs {
   outs: number;
   swipe: number;
   beat: number;
+  name: number;
+  move: number;
 }
 
 interface DeltaEvent {
@@ -68,7 +70,7 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [dailyGoalMet, setDailyGoalMet] = useState<boolean>(false);
   const [usesLeft, setUsesLeft] = useState<number>(3);
   const [biggestPot, setBiggestPot] = useState<number>(0);
-  const [highs, setHighs] = useState<ArenaHighs>({ whw: 0, outs: 0, swipe: 0, beat: 0 });
+  const [highs, setHighs] = useState<ArenaHighs>({ whw: 0, outs: 0, swipe: 0, beat: 0, name: 0, move: 0 });
   const [hardMode, setHardMode] = useState<boolean>(false);
   const [dailyClaimed, setDailyClaimed] = useState<boolean>(false);
   const [delta, setDelta] = useState<DeltaEvent | null>(null);

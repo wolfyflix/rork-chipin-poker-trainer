@@ -7,8 +7,8 @@ import ChipIcon from "@/components/ChipIcon";
 import PlayingCard from "@/components/PlayingCard";
 import PressButton from "@/components/PressButton";
 import colors from "@/constants/colors";
-import { CURRICULUM, MCQuestion, OUTS_SCENARIOS, OutsScenario } from "@/lib/curriculum";
-import { Card, compareEval, drawDeck, evaluate, myOdds } from "@/lib/poker";
+import { CURRICULUM, HAND_NAMES, MCQuestion, OUTS_SCENARIOS, OutsScenario } from "@/lib/curriculum";
+import { Card, compareEval, drawDeck, evaluate, myOdds, oddsVerdict } from "@/lib/poker";
 import { useGame } from "@/providers/GameProvider";
 
 interface DuelData {
@@ -27,14 +27,36 @@ interface BoardData {
   oddsPct: number;
 }
 
+interface NameData {
+  cards: Card[]; // 7 cards (2 hero + 5 board) — but we show 5 as the "hand"
+  hand: Card[]; // the 5 cards to display
+  correctName: string;
+  opts: string[]; // 4 options, correct at index `answer`
+  answer: number;
+}
+
+interface MoveData {
+  hero: Card[];
+  board: Card[];
+  heroName: string;
+  winPct: number;
+  pot: number;
+  oppBet: number;
+  // 0 = fold, 1 = call, 2 = raise
+  answer: 0 | 1 | 2;
+  why: string;
+}
+
 interface PreparedQuestion {
-  kind: "mc" | "duel" | "outs" | "board";
+  kind: "mc" | "duel" | "outs" | "board" | "name" | "move";
   mc?: MCQuestion;
   order?: number[];
   duel?: DuelData;
   outs?: OutsScenario;
   outsOpts?: number[];
   board?: BoardData;
+  name?: NameData;
+  move?: MoveData;
 }
 
 interface Feedback {
@@ -62,6 +84,74 @@ function makeDuel(): DuelData {
     names = [e1.name, e2.name];
   } while (cmp === 0);
   return { board, hands: [h1, h2], names, win: cmp > 0 ? 0 : 1 };
+}
+
+/** Map an eval category to a hand-name label (matching HAND_NAMES order). */
+function catToName(cat: number, kick0: number): string {
+  if (cat === 8) return kick0 === 14 ? "Royal Flush" : "Straight Flush";
+  if (cat === 7) return "Four of a Kind";
+  if (cat === 6) return "Full House";
+  if (cat === 5) return "Flush";
+  if (cat === 4) return "Straight";
+  if (cat === 3) return "Three of a Kind";
+  if (cat === 2) return "Two Pair";
+  if (cat === 1) return "Pair";
+  return "High Card";
+}
+
+/** Generate a Name That Hand challenge — show 5 cards, pick the correct hand name. */
+function makeName(): NameData {
+  // Draw 5 cards that form a recognizable 5-card hand.
+  const used = new Set<number>();
+  // ~70% chance: draw a random 5-card hand (often high card / pair).
+  // ~30% chance: force a stronger hand by drawing 7 and taking the best 5.
+  let hand: Card[];
+  let ev;
+  if (Math.random() < 0.3) {
+    const seven = drawDeck(7, used);
+    ev = evaluate(seven);
+    // We can't easily extract the best 5, so just show all 7... no.
+    // Instead, show 5 and evaluate those 5 directly.
+    hand = seven.slice(0, 5);
+    ev = evaluate(hand);
+  } else {
+    hand = drawDeck(5, used);
+    ev = evaluate(hand);
+  }
+  const correctName = catToName(ev.cat, ev.kick[0]);
+  // Build 4 options: correct + 3 random distractors from HAND_NAMES.
+  const distractors = HAND_NAMES.filter((n) => n !== correctName)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 3);
+  const opts = [...distractors, correctName].sort(() => Math.random() - 0.5);
+  const answer = opts.indexOf(correctName);
+  return { cards: hand, hand, correctName, opts, answer };
+}
+
+/** Generate a Bet or Fold challenge — hero + board + pot + opp bet → fold/call/raise. */
+function makeMove(): MoveData {
+  const used = new Set<number>();
+  const boardLen = [3, 4, 5][Math.floor(Math.random() * 3)];
+  const board = drawDeck(boardLen, used);
+  const hero = drawDeck(2, used);
+  const heroEv = evaluate([...hero, ...board]);
+  const o = myOdds(hero, board, 1, 500);
+  const winPct = o.winPct;
+  const pot = [100, 150, 200, 250, 300][Math.floor(Math.random() * 5)];
+  const oppBet = Math.round(pot * [0.33, 0.5, 0.75, 1][Math.floor(Math.random() * 4)]);
+  let answer: 0 | 1 | 2;
+  let why: string;
+  if (winPct >= 60) {
+    answer = 2;
+    why = `~${winPct.toFixed(0)}% vs one opponent — you're ahead. Raise for value and build the pot.`;
+  } else if (winPct >= 33) {
+    answer = 1;
+    why = `~${winPct.toFixed(0)}% — close to your fair share. The price is okay to call, but don't get married to it.`;
+  } else {
+    answer = 0;
+    why = `~${winPct.toFixed(0)}% — behind. You're not getting the right price. Fold and save chips.`;
+  }
+  return { hero, board, heroName: heroEv.name, winPct, pot, oppBet, answer, why };
 }
 
 /** Generate a "beat the board" challenge: hero hole + board, are you ahead of a random opponent? */
@@ -108,6 +198,10 @@ export default function LessonScreen() {
       setPrepared({ kind: "outs", outs: sc, outsOpts: opts });
     } else if (q.t === "board") {
       setPrepared({ kind: "board", board: makeBoard() });
+    } else if (q.t === "name") {
+      setPrepared({ kind: "name", name: makeName() });
+    } else if (q.t === "move") {
+      setPrepared({ kind: "move", move: makeMove() });
     } else {
       const order = q.opts.map((_, oi) => oi).sort(() => Math.random() - 0.5);
       setPrepared({ kind: "mc", mc: q, order });
@@ -161,6 +255,37 @@ export default function LessonScreen() {
       setPicked(v);
       const sc = prepared.outs;
       showFB(v === sc.outs, sc.why, sc.why);
+    },
+    [picked, prepared, showFB],
+  );
+
+  const answerName = useCallback(
+    (pos: number) => {
+      if (picked != null || !prepared?.name) return;
+      setPicked(pos);
+      const n = prepared.name;
+      const good = pos === n.answer;
+      showFB(
+        good,
+        `Correct — that's a ${n.correctName}. Hand-reading getting fast.`,
+        `That hand is a ${n.correctName}. Rankings ladder: high card → pair → two pair → trips → straight → flush → full house → quads → straight flush.`,
+      );
+    },
+    [picked, prepared, showFB],
+  );
+
+  const answerMove = useCallback(
+    (choice: 0 | 1 | 2) => {
+      if (picked != null || !prepared?.move) return;
+      setPicked(choice);
+      const m = prepared.move;
+      const good = choice === m.answer;
+      const labels = ["Fold", "Call", "Raise"];
+      showFB(
+        good,
+        `${labels[choice]} was right. ${m.why}`,
+        `Best move: ${labels[m.answer]}. ${m.why}`,
+      );
     },
     [picked, prepared, showFB],
   );
@@ -402,6 +527,90 @@ export default function LessonScreen() {
             </View>
           </>
         )}
+
+        {prepared?.kind === "name" && prepared.name && (
+          <>
+            <Text style={styles.qText}>Name that hand — what do these 5 cards make?</Text>
+            <View style={styles.boardStrip}>
+              {prepared.name.hand.map((c, ci) => <PlayingCard key={ci} card={c} size="small" />)}
+            </View>
+            <Text style={styles.boardHint}>Tap the hand type that matches the 5 cards above.</Text>
+            {prepared.name.opts.map((opt, pos) => {
+              const isRight = picked != null && pos === prepared.name?.answer;
+              const isWrong = picked === pos && pos !== prepared.name?.answer;
+              return (
+                <Pressable
+                  key={pos}
+                  onPress={() => answerName(pos)}
+                  style={[styles.opt, isRight && styles.optRight, isWrong && styles.optWrong]}
+                  testID={`name-${pos}`}
+                >
+                  <Text style={[styles.optText, isRight && { color: colors.good }, isWrong && { color: colors.red }]}>
+                    {opt}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </>
+        )}
+
+        {prepared?.kind === "move" && prepared.move && (
+          <>
+            <Text style={styles.qText}>Bet or fold — what do you do?</Text>
+            <Text style={styles.sectionLabel}>Your hand · {prepared.move.heroName}</Text>
+            <View style={styles.boardStrip}>
+              {prepared.move.hero.map((c, ci) => <PlayingCard key={ci} card={c} size="small" />)}
+            </View>
+            {prepared.move.board.length > 0 && (
+              <>
+                <Text style={[styles.sectionLabel, { marginTop: 10 }]}>The board</Text>
+                <View style={styles.boardStrip}>
+                  {prepared.move.board.map((c, ci) => <PlayingCard key={ci} card={c} size="small" />)}
+                </View>
+              </>
+            )}
+            <View style={styles.movePotRow}>
+              <View style={styles.movePotPill}>
+                <Text style={styles.movePotK}>POT</Text>
+                <Text style={styles.movePotV}>{prepared.move.pot}</Text>
+              </View>
+              <View style={[styles.movePotPill, { borderColor: colors.red }]}>
+                <Text style={styles.movePotK}>HE BET</Text>
+                <Text style={[styles.movePotV, { color: colors.red }]}>{prepared.move.oppBet}</Text>
+              </View>
+              <View style={[styles.movePotPill, { borderColor: colors.gold }]}>
+                <Text style={styles.movePotK}>YOUR %</Text>
+                <Text style={[styles.movePotV, { color: colors.gold2 }]}>{prepared.move.winPct.toFixed(0)}</Text>
+              </View>
+            </View>
+            <View style={styles.moveRow}>
+              {(["Fold", "Call", "Raise"] as const).map((label, idx) => {
+                const choice = idx as 0 | 1 | 2;
+                const isRight = picked != null && choice === prepared.move?.answer;
+                const isWrong = picked === choice && choice !== prepared.move?.answer;
+                const emoji = ["🚪", "🤝", "🚀"][idx] ?? "";
+                return (
+                  <Pressable
+                    key={idx}
+                    onPress={() => answerMove(choice)}
+                    style={[
+                      styles.moveBtn,
+                      isRight && styles.moveRight,
+                      isWrong && styles.moveWrong,
+                    ]}
+                    testID={`move-${label.toLowerCase()}`}
+                  >
+                    <Text style={styles.moveEmoji}>{emoji}</Text>
+                    <Text style={[styles.moveBtnText, isRight && { color: colors.good }, isWrong && { color: colors.red }]}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.boardHint}>Think: are you getting the right price? Should you build the pot?</Text>
+          </>
+        )}
       </ScrollView>
 
       {feedback && (
@@ -533,6 +742,34 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   boardOptSub: { fontSize: 11, color: colors.muted, fontFamily: "Outfit_600SemiBold", marginTop: 4 },
+  movePotRow: { flexDirection: "row", gap: 10, justifyContent: "center", marginVertical: 14 },
+  movePotPill: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    minWidth: 86,
+  },
+  movePotK: { fontSize: 9, fontFamily: "Outfit_800ExtraBold", letterSpacing: 1.3, color: colors.dim, textTransform: "uppercase" },
+  movePotV: { fontSize: 18, fontFamily: "Outfit_900Black", color: colors.cream, marginTop: 2 },
+  moveRow: { flexDirection: "row", gap: 12, marginTop: 6 },
+  moveBtn: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.line,
+    borderRadius: 18,
+    paddingVertical: 16,
+    gap: 6,
+  },
+  moveRight: { borderColor: colors.good, backgroundColor: "rgba(67,209,124,0.12)" },
+  moveWrong: { borderColor: colors.red, backgroundColor: "rgba(228,87,61,0.12)" },
+  moveEmoji: { fontSize: 22 },
+  moveBtnText: { fontFamily: "Outfit_900Black", fontSize: 15, color: colors.cream, letterSpacing: 0.3 },
   feedback: {
     position: "absolute",
     bottom: 0,

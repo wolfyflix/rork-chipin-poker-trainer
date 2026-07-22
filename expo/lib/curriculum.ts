@@ -18,7 +18,11 @@ export interface MCQuestion {
 export interface DuelQuestion { t: "duel" }
 export interface OutsQuestion { t: "outs"; idx: number }
 export interface BoardQuestion { t: "board" }
-export type Question = MCQuestion | DuelQuestion | OutsQuestion | BoardQuestion;
+/** Name That Hand — runtime-generated. 5 cards shown, pick the correct hand name. */
+export interface NameQuestion { t: "name" }
+/** Bet or Fold — runtime-generated. Hero + board + pot + opponent bet → pick Fold/Call/Raise. */
+export interface MoveQuestion { t: "move" }
+export type Question = MCQuestion | DuelQuestion | OutsQuestion | BoardQuestion | NameQuestion | MoveQuestion;
 
 export interface Lesson {
   id: string;
@@ -78,6 +82,7 @@ export const CURRICULUM: Unit[] = [
           fb: { right: "It's the best 5 cards that count — if both made the exact same straight, it's a chop. Kickers only matter for unmatched cards.", wrong: "Same 5-card straight = split pot. Hole-card ownership doesn't matter; only the 5-card hand does." } },
         { t: "duel" },
         { t: "board" },
+        { t: "name" },
       ] },
       { id: "u1l2", title: "Which Hands to Play", questions: [
         { q: "You're dealt 7♦2♣ (the famous worst hand). Someone raises. You…", opts: ["Fold, obviously", "Call, it might hit", "Raise, nobody expects it", "Ask the table for advice"], a: 0,
@@ -111,6 +116,8 @@ export const CURRICULUM: Unit[] = [
           fb: { right: "The \"cheap\" price hides the real cost: you act first on every street after. Trash hand + worst position = a leak.", wrong: "You'll be first to act on flop, turn, AND river. The discount isn't worth being blind on every betting round." } },
         { t: "duel" },
         { t: "board" },
+        { t: "name" },
+        { t: "move" },
       ] },
       { id: "u1l4", title: "Bet Sizing 101", questions: [
         { q: "The pot is 100 chips in your dorm game. A \"standard\" strong bet is about…", opts: ["50-100 (half to full pot)", "5 (min bet)", "500 (5x pot)", "Whatever's in your pocket"], a: 0,
@@ -139,6 +146,8 @@ export const CURRICULUM: Unit[] = [
           fb: { right: "The discipline that separates winners. If everything he'd bet like this beats you, top pair is a pretty bluff-catcher.", wrong: "\"But I have top pair\" is the most expensive sentence in poker. If his value hands all beat you, folding IS the win." } },
         { t: "outs", idx: 8 },
         { t: "board" },
+        { t: "move" },
+        { t: "name" },
       ] },
     ],
   },
@@ -200,6 +209,7 @@ export const CURRICULUM: Unit[] = [
         { q: "Biggest takeaway from this unit?", opts: ["Calling depends on price, not hope", "Always chase flushes", "Math ruins poker", "Bet big = win big"], a: 0,
           fb: { right: "That's it. Same draw, different bet size = different answer. Your friends are still using hope.", wrong: "The unit in one line: the PRICE decides, not the dream. Compare equity to pot odds and the answer falls out." } },
         { t: "duel" },
+        { t: "move" },
       ] },
     ],
   },
@@ -220,6 +230,7 @@ export const CURRICULUM: Unit[] = [
           fb: { right: "Three spades + three-connected = made straights, made flushes, and combo draws all at once. Top pair here is a trap.", wrong: "Wet, connected, suited — the whole zoo is in play. Slow way down with one-pair hands on boards like this." } },
         { t: "duel" },
         { t: "board" },
+        { t: "name" },
       ] },
       { id: "u3l2", title: "Scare Cards", questions: [
         { q: "You have K♣K♠. Flop 9♦6♣2♥ (great). Turn: A♠. Why is that scary?", opts: ["Any ace now beats your kings", "Aces are unlucky", "It completes a flush", "It isn't"], a: 0,
@@ -259,6 +270,7 @@ export const CURRICULUM: Unit[] = [
         { q: "Someone bets big into 4 players on a wet board. Their hand is usually…", opts: ["Real — multiway bluffs are rare", "Always a bluff", "A misclick", "Impossible to say"], a: 0,
           fb: { right: "Bluffing one person is brave; bluffing four is charity. Multiway aggression = believe it.", wrong: "Into a crowd, big bets are honest. Someone always has a piece — bluffs need heads-up, not a party." } },
         { t: "board" },
+        { t: "move" },
       ] },
     ],
   },
@@ -289,6 +301,8 @@ export const CURRICULUM: Unit[] = [
           fb: { right: "Great folds come from great data. The pros fold because they KNOW, not because they feel.", wrong: "Big folds come from patterns, not vibes. Build the book on each player and the reads get undeniable." } },
         { t: "board" },
         { t: "duel" },
+        { t: "name" },
+        { t: "move" },
       ] },
       { id: "u4cp", title: "Checkpoint: The Full Picture", boss: true, questions: [
         { q: "Tight player limps for the first time all night, then calls your raise. On the flop he checks. You bet and he snaps all-in. Read?", opts: ["He has a monster — he was trapping", "He's bluffing for the first time", "He misclicked", "Coin flip, call it off"], a: 0,
@@ -334,6 +348,12 @@ export const SWIPE_HANDS: SwipeHand[] = [
   { c: [{ r: 10, s: 2 }, { r: 5, s: 1 }], pos: "Early position", play: false, why: "T5 offsuit — no straight potential, no suit. Easy fold." },
   { c: [{ r: 12, s: 2 }, { r: 12, s: 3 }], pos: "Early position", play: true, why: "Pocket queens. Raise it. Top-3 hand, fear only KK and AA." },
   { c: [{ r: 14, s: 2 }, { r: 4, s: 2 }], pos: "On the button", play: true, why: "A4 suited on the button — flush potential, wheel straight draw, raise if folded to you." },
+];
+
+/** All 10 poker hand category names, best → worst. Used by the Name That Hand drill. */
+export const HAND_NAMES: string[] = [
+  "Royal Flush", "Straight Flush", "Four of a Kind", "Full House", "Flush",
+  "Straight", "Three of a Kind", "Two Pair", "Pair", "High Card",
 ];
 
 export const CHEAT_RANKS: { n: string; ex: Card[] }[] = [
