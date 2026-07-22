@@ -1,11 +1,19 @@
-import React, { useCallback, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useQuery } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import PressButton from "@/components/PressButton";
 import colors from "@/constants/colors";
+import { fetchOfferings, isPurchasesConfigured, purchasePackageById, restorePurchases } from "@/lib/revenuecat";
 import { useGame } from "@/providers/GameProvider";
 
 type Tier = "yr" | "mo" | "wk";
+
+const TIER_PACKAGE: Record<Tier, string> = {
+  yr: "$rc_annual",
+  mo: "$rc_monthly",
+  wk: "$rc_weekly",
+};
 
 const TIER_CTA: Record<Tier, string> = {
   yr: "Unlock the year — $69.99",
@@ -26,18 +34,79 @@ const FEATURES: { icon: string; title: string; sub: string }[] = [
 ];
 
 /**
- * 3-tier paywall UI. Stage 3 will connect this to RevenueCat —
- * for now the CTA is a visual placeholder.
+ * 3-tier paywall backed by RevenueCat. Fetches the current offering's packages,
+ * purchases the selected tier on CTA, and restores previous purchases.
+ * Fails soft when RevenueCat isn't configured (web/preview without a key).
  */
 export default function PaywallSheet() {
-  const { paywallVisible, paywallMessage, closePaywall } = useGame();
+  const { paywallVisible, paywallMessage, closePaywall, refreshProStatus } = useGame();
   const [tier, setTier] = useState<Tier>("yr");
-  const [notice, setNotice] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [noticeOk, setNoticeOk] = useState<boolean>(false);
 
-  const handleCTA = useCallback(() => {
-    setNotice(true);
-    setTimeout(() => setNotice(false), 2500);
+  const configured = isPurchasesConfigured();
+
+  const { data: current, isLoading } = useQuery({
+    queryKey: ["rc-offerings"],
+    queryFn: fetchOfferings,
+    enabled: paywallVisible && configured,
+    staleTime: 60_000,
+  });
+
+  /** Localized price strings from the fetched packages, falling back to hardcoded USD. */
+  const prices = useMemo(() => {
+    const fallback = { yr: "$69.99", mo: "$14.99", wk: "$6.99" };
+    if (!current) return fallback;
+    const out: Partial<Record<Tier, string>> = {};
+    (["yr", "mo", "wk"] as Tier[]).forEach((t) => {
+      const pkg = current.availablePackages.find((p) => p.identifier === TIER_PACKAGE[t]);
+      if (pkg?.product?.priceString) out[t] = pkg.product.priceString;
+    });
+    return { ...fallback, ...out };
+  }, [current]);
+
+  const flash = useCallback((msg: string, ok: boolean) => {
+    setNotice(msg);
+    setNoticeOk(ok);
+    setTimeout(() => setNotice(null), 3200);
   }, []);
+
+  const handleCTA = useCallback(async () => {
+    if (!configured) {
+      flash("Purchases aren't available in this build. Try the app on a device!", false);
+      return;
+    }
+    setBusy(true);
+    const res = await purchasePackageById(TIER_PACKAGE[tier]);
+    setBusy(false);
+    if (res.ok) {
+      await refreshProStatus();
+      flash("Welcome to ChipIn Pro 👑 — everything's unlocked.", true);
+      setTimeout(() => closePaywall(), 1400);
+    } else if (!res.cancelled) {
+      flash(res.error, false);
+    }
+  }, [configured, tier, refreshProStatus, closePaywall]);
+
+  const handleRestore = useCallback(async () => {
+    if (!configured) {
+      flash("Purchases aren't available in this build.", false);
+      return;
+    }
+    setBusy(true);
+    const res = await restorePurchases();
+    setBusy(false);
+    if (res.ok) {
+      await refreshProStatus();
+      flash("Pro restored 👑 — welcome back.", true);
+      setTimeout(() => closePaywall(), 1400);
+    } else if (!res.cancelled) {
+      flash(res.error, false);
+    }
+  }, [configured, refreshProStatus, closePaywall]);
+
+  const ctaLabel = busy ? "Hold up…" : TIER_CTA[tier];
 
   return (
     <Modal visible={paywallVisible} transparent animationType="slide" onRequestClose={closePaywall}>
@@ -72,7 +141,7 @@ export default function PaywallSheet() {
                 <Text style={styles.tierSub}>The whole year, locked in</Text>
               </View>
               <View style={styles.tierPrice}>
-                <Text style={styles.tierP}>$69.99</Text>
+                <Text style={styles.tierP}>{prices.yr}</Text>
                 <Text style={styles.tierPer}>$5.83/mo</Text>
               </View>
             </Pressable>
@@ -85,7 +154,7 @@ export default function PaywallSheet() {
                 <Text style={styles.tierSub}>The standard training plan</Text>
               </View>
               <View style={styles.tierPrice}>
-                <Text style={styles.tierP}>$14.99</Text>
+                <Text style={styles.tierP}>{prices.mo}</Text>
                 <Text style={styles.tierPer}>per month</Text>
               </View>
             </Pressable>
@@ -95,15 +164,22 @@ export default function PaywallSheet() {
                 <Text style={styles.tierSub}>Just need it for this weekend&apos;s game?</Text>
               </View>
               <View style={styles.tierPrice}>
-                <Text style={styles.tierP}>$6.99</Text>
+                <Text style={styles.tierP}>{prices.wk}</Text>
                 <Text style={styles.tierPer}>per week</Text>
               </View>
             </Pressable>
           </View>
 
-          <PressButton label={TIER_CTA[tier]} variant="gold" onPress={handleCTA} />
-          {notice && <Text style={styles.notice}>Purchases arrive with the RevenueCat build — coming soon.</Text>}
-          <PressButton label="Not now" variant="ghost" onPress={closePaywall} />
+          {isLoading && configured ? (
+            <ActivityIndicator color={colors.gold2} style={{ marginVertical: 8 }} />
+          ) : null}
+
+          <PressButton label={ctaLabel} variant="gold" onPress={handleCTA} disabled={busy} testID="paywall-cta" />
+          {notice ? (
+            <Text style={[styles.notice, noticeOk ? styles.noticeOk : styles.noticeBad]}>{notice}</Text>
+          ) : null}
+          <PressButton label="Restore purchases" variant="ghost" onPress={handleRestore} disabled={busy} />
+          <PressButton label="Not now" variant="ghost" onPress={closePaywall} disabled={busy} />
           <Text style={styles.fine}>{TIER_FINE[tier]}</Text>
         </ScrollView>
       </View>
@@ -190,11 +266,12 @@ const styles = StyleSheet.create({
   tierPer: { fontSize: 10.5, color: colors.dim, fontFamily: "Outfit_700Bold" },
   notice: {
     textAlign: "center",
-    color: colors.gold2,
     fontSize: 12.5,
     fontFamily: "Outfit_700Bold",
     marginBottom: 4,
   },
+  noticeOk: { color: colors.mint2 },
+  noticeBad: { color: colors.red },
   fine: {
     textAlign: "center",
     fontSize: 11,

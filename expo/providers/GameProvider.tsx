@@ -1,5 +1,7 @@
 import createContextHook from "@nkzw/create-context-hook";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { fetchCustomerInfo, hasProEntitlement, isPurchasesConfigured } from "@/lib/revenuecat";
 
 export interface ArenaHighs {
   whw: number;
@@ -57,6 +59,34 @@ export const [GameProvider, useGame] = createContextHook(() => {
   // Lives — start full, refill on a timer.
   const [lives, setLives] = useState<number>(MAX_LIVES);
   const [nextLifeAt, setNextLifeAt] = useState<number | null>(null);
+
+  /** Sync `pro` with RevenueCat customer info on mount, and whenever a purchase completes upstream. */
+  useEffect(() => {
+    if (!isPurchasesConfigured()) return;
+    let cancelled = false;
+    fetchCustomerInfo()
+      .then((info) => {
+        if (cancelled) return;
+        setPro(hasProEntitlement(info));
+      })
+      .catch(() => {
+        /* fail soft — keep local state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Re-check entitlement after a purchase completes (called from PaywallSheet). */
+  const refreshProStatus = useCallback(async () => {
+    if (!isPurchasesConfigured()) return;
+    try {
+      const info = await fetchCustomerInfo();
+      setPro(hasProEntitlement(info));
+    } catch {
+      /* keep local state */
+    }
+  }, []);
 
   const payChips = useCallback((n: number, silent?: boolean) => {
     setChips((c) => Math.max(0, c + n));
@@ -201,7 +231,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
       breakStreak,
       restoreStreak,
       toggleHardMode,
+      refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, payChips, completeLesson, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, payChips, completeLesson, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
   );
 });
