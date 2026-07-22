@@ -7,7 +7,7 @@ import ChipIcon from "@/components/ChipIcon";
 import PlayingCard from "@/components/PlayingCard";
 import PressButton from "@/components/PressButton";
 import colors from "@/constants/colors";
-import { CURRICULUM, HAND_NAMES, MCQuestion, OUTS_SCENARIOS, OutsScenario } from "@/lib/curriculum";
+import { CURRICULUM, ExampleHand, HAND_NAMES, MCQuestion, OUTS_SCENARIOS, OutsScenario, PrimerBlock } from "@/lib/curriculum";
 import { Card, compareEval, drawDeck, evaluate, myOdds, oddsVerdict } from "@/lib/poker";
 import { useGame } from "@/providers/GameProvider";
 
@@ -184,8 +184,11 @@ export default function LessonScreen() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [done, setDone] = useState<boolean>(false);
   const [payout, setPayout] = useState<number>(0);
+  const [phase, setPhase] = useState<"primer" | "quiz">("primer");
 
   const total = lesson?.questions.length ?? 0;
+
+  const startQuiz = useCallback(() => setPhase("quiz"), []);
 
   useEffect(() => {
     if (!lesson || i >= lesson.questions.length) return;
@@ -340,6 +343,10 @@ export default function LessonScreen() {
     );
   }
 
+  if (phase === "primer" && lesson.primer) {
+    return <PrimerScreen primer={lesson.primer} onStart={startQuiz} onSkip={quit} insets={insets} title={lesson.title} />;
+  }
+
   if (done) {
     const frac = total > 0 ? correct / total : 0;
     const net = payout;
@@ -404,6 +411,13 @@ export default function LessonScreen() {
         {prepared?.kind === "mc" && prepared.mc && prepared.order && (
           <>
             <Text style={styles.qText}>{prepared.mc.q}</Text>
+            {prepared.mc.ex && prepared.mc.ex.length > 0 && (
+              <View style={styles.exWrap}>
+                {prepared.mc.ex.map((eh, ei) => (
+                  <ExampleHandView key={ei} hand={eh} />
+                ))}
+              </View>
+            )}
             {prepared.order.map((oi, pos) => {
               const isRight = picked != null && oi === prepared.mc?.a;
               const isWrong = picked === pos && oi !== prepared.mc?.a;
@@ -824,4 +838,246 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginTop: 2,
   },
+  exWrap: { gap: 12, marginBottom: 22 },
+  exCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  exLabelRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  exLabelTag: {
+    fontSize: 10,
+    fontFamily: "Outfit_800ExtraBold",
+    letterSpacing: 1.3,
+    color: colors.mint,
+    textTransform: "uppercase",
+  },
+  exCards: { flexDirection: "row", gap: 6, justifyContent: "center", flexWrap: "wrap" },
+  exCaption: {
+    fontSize: 12.5,
+    color: colors.muted,
+    fontFamily: "Outfit_500Medium",
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 17,
+  },
+  exNoCards: {
+    fontSize: 13,
+    color: colors.mint2,
+    fontFamily: "Outfit_700Bold",
+    textAlign: "center",
+    paddingVertical: 4,
+  },
+  primerScreen: { flex: 1, backgroundColor: colors.bg },
+  primerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 8,
+  },
+  primerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.mint,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  primerBadgeText: {
+    fontSize: 11,
+    fontFamily: "Outfit_800ExtraBold",
+    letterSpacing: 1.4,
+    color: colors.mint,
+    textTransform: "uppercase",
+  },
+  primerScroll: { padding: 20, paddingBottom: 120 },
+  primerTitle: {
+    fontSize: 27,
+    fontFamily: "Outfit_900Black",
+    letterSpacing: -0.5,
+    color: colors.cream,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  primerTagline: {
+    fontSize: 15,
+    color: colors.mint2,
+    fontFamily: "Outfit_600SemiBold",
+    marginBottom: 24,
+    lineHeight: 21,
+  },
+  primerBlock: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 22,
+    padding: 18,
+    marginBottom: 14,
+  },
+  primerBlockH: {
+    fontSize: 17,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.cream,
+    marginBottom: 8,
+    letterSpacing: -0.2,
+  },
+  primerBlockP: {
+    fontSize: 14.5,
+    lineHeight: 22,
+    color: colors.cream,
+    opacity: 0.88,
+    fontFamily: "Outfit_500Medium",
+    marginBottom: 8,
+  },
+  primerExBox: {
+    marginTop: 12,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  primerExLabel: {
+    fontSize: 10.5,
+    fontFamily: "Outfit_800ExtraBold",
+    letterSpacing: 1.3,
+    color: colors.mint,
+    textTransform: "uppercase",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  primerExCards: { flexDirection: "row", gap: 6, justifyContent: "center", flexWrap: "wrap" },
+  primerExCaption: {
+    fontSize: 12.5,
+    color: colors.muted,
+    fontFamily: "Outfit_500Medium",
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 17,
+  },
+  primerExTextOnly: {
+    fontSize: 13.5,
+    color: colors.mint2,
+    fontFamily: "Outfit_700Bold",
+    textAlign: "center",
+    paddingVertical: 6,
+  },
+  primerCta: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 20,
+    paddingBottom: 28,
+    backgroundColor: colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  primerSkip: {
+    fontSize: 13,
+    color: colors.dim,
+    fontFamily: "Outfit_600SemiBold",
+    textAlign: "center",
+    marginTop: 12,
+  },
 });
+
+/** Render a single example hand inside an MC question. */
+function ExampleHandView({ hand }: { hand: ExampleHand }) {
+  return (
+    <View style={styles.exCard}>
+      {hand.label && (
+        <View style={styles.exLabelRow}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.mint }} />
+          <Text style={styles.exLabelTag}>{hand.label}</Text>
+        </View>
+      )}
+      {hand.cards.length > 0 ? (
+        <View style={styles.exCards}>
+          {hand.cards.map((c, ci) => (
+            <PlayingCard key={ci} card={c} size="small" />
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.exNoCards}>— no cards —</Text>
+      )}
+      <Text style={styles.exCaption}>{hand.caption}</Text>
+    </View>
+  );
+}
+
+/** Visual tutorial shown before a lesson's questions. */
+function PrimerScreen({
+  primer,
+  onStart,
+  onSkip,
+  insets,
+  title,
+}: {
+  primer: { tagline: string; blocks: PrimerBlock[] };
+  onStart: () => void;
+  onSkip: () => void;
+  insets: { top: number; bottom: number };
+  title: string;
+}) {
+  return (
+    <View style={[styles.primerScreen, { paddingTop: insets.top }]}>
+      <View style={styles.primerHeader}>
+        <View style={styles.primerBadge}>
+          <Text style={{ fontSize: 13 }}>📖</Text>
+          <Text style={styles.primerBadgeText}>Before we start</Text>
+        </View>
+        <Pressable onPress={onSkip} hitSlop={12} testID="primer-skip">
+          <Text style={styles.quizX}>✕</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.primerScroll}>
+        <Text style={styles.primerTitle}>{title}</Text>
+        <Text style={styles.primerTagline}>{primer.tagline}</Text>
+
+        {primer.blocks.map((b, bi) => (
+          <View key={bi} style={styles.primerBlock}>
+            <Text style={styles.primerBlockH}>{b.h}</Text>
+            <Text style={styles.primerBlockP}>{b.p}</Text>
+            {b.ex && b.ex.length > 0 && (
+              <View style={{ gap: 12 }}>
+                {b.ex.map((eh, ei) => (
+                  <View key={ei} style={styles.primerExBox}>
+                    {eh.label && <Text style={styles.primerExLabel}>{eh.label}</Text>}
+                    {eh.cards.length > 0 ? (
+                      <View style={styles.primerExCards}>
+                        {eh.cards.map((c, ci) => (
+                          <PlayingCard key={ci} card={c} size="small" />
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.primerExTextOnly}>{eh.caption}</Text>
+                    )}
+                    {eh.cards.length > 0 && <Text style={styles.primerExCaption}>{eh.caption}</Text>}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={[styles.primerCta, { paddingBottom: insets.bottom + 20 }]}>
+        <PressButton label="Start the lesson" onPress={onStart} testID="primer-start" />
+        <Pressable onPress={onSkip} style={{ alignSelf: "center", marginTop: 10 }} hitSlop={8}>
+          <Text style={styles.primerSkip}>Skip tutorial</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
