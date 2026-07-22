@@ -1,7 +1,16 @@
 import createContextHook from "@nkzw/create-context-hook";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchCustomerInfo, hasProEntitlement, isPurchasesConfigured } from "@/lib/revenuecat";
+
+/** YYYY-MM-DD for the local day. Used to bucket daily-goal XP. */
+function todayKey(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export interface ArenaHighs {
   whw: number;
@@ -28,6 +37,12 @@ const LIFE_REFILL_MS = 8 * 60 * 1000;
 /** Streak recovery — pay chips to restore a broken streak (Duolingo-style). */
 export const STREAK_RECOVERY_COST = 100;
 
+/** Daily goal — Duolingo-style. Earn at least this many XP per day. */
+export const DAILY_GOAL_XP = 50;
+
+/** XP award per correct lesson answer. */
+export const XP_PER_CORRECT = 10;
+
 /**
  * ChipIn game state — Stage 1 uses local (in-memory) state with placeholder data.
  * Stage 2 will sync this with Supabase.
@@ -46,6 +61,11 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [streakRecoveredToday, setStreakRecoveredToday] = useState<boolean>(false);
   const [completed, setCompleted] = useState<Set<string>>(new Set(["u1l1", "u1l2"]));
   const [pro, setPro] = useState<boolean>(false);
+
+  // Daily goal tracking — Duolingo-style. Persists the date bucket and XP earned that day.
+  const [dailyXp, setDailyXp] = useState<number>(0);
+  const [dailyDate, setDailyDate] = useState<string>(todayKey());
+  const [dailyGoalMet, setDailyGoalMet] = useState<boolean>(false);
   const [usesLeft, setUsesLeft] = useState<number>(3);
   const [biggestPot, setBiggestPot] = useState<number>(0);
   const [highs, setHighs] = useState<ArenaHighs>({ whw: 0, outs: 0, swipe: 0, beat: 0 });
@@ -77,6 +97,44 @@ export const [GameProvider, useGame] = createContextHook(() => {
     };
   }, []);
 
+  /** Load persisted daily goal state on mount. Resets if the date bucket rolled over. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem("@chipin_daily");
+        if (cancelled || !raw) return;
+        const parsed = JSON.parse(raw) as { date: string; xp: number; met: boolean };
+        const today = todayKey();
+        if (parsed.date === today) {
+          setDailyDate(today);
+          setDailyXp(parsed.xp);
+          setDailyGoalMet(parsed.met);
+        } else {
+          // new day — reset
+          setDailyDate(today);
+          setDailyXp(0);
+          setDailyGoalMet(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Persist daily goal state whenever it changes. */
+  useEffect(() => {
+    AsyncStorage.setItem(
+      "@chipin_daily",
+      JSON.stringify({ date: dailyDate, xp: dailyXp, met: dailyGoalMet }),
+    ).catch(() => {
+      /* ignore */
+    });
+  }, [dailyDate, dailyXp, dailyGoalMet]);
+
   /** Re-check entitlement after a purchase completes (called from PaywallSheet). */
   const refreshProStatus = useCallback(async () => {
     if (!isPurchasesConfigured()) return;
@@ -104,6 +162,15 @@ export const [GameProvider, useGame] = createContextHook(() => {
     setCompleted((prev) => {
       const next = new Set(prev);
       next.add(lessonId);
+      return next;
+    });
+  }, []);
+
+  /** Award XP for a correct answer toward today's goal. Idempotent-ish by question id. */
+  const awardXp = useCallback((amount: number = XP_PER_CORRECT) => {
+    setDailyXp((prev) => {
+      const next = prev + amount;
+      if (next >= DAILY_GOAL_XP) setDailyGoalMet(true);
       return next;
     });
   }, []);
@@ -217,8 +284,12 @@ export const [GameProvider, useGame] = createContextHook(() => {
       tableUnlocked,
       paywallVisible,
       paywallMessage,
+      dailyXp,
+      dailyGoalMet,
+      dailyGoal: DAILY_GOAL_XP,
       payChips,
       completeLesson,
+      awardXp,
       recordHigh,
       chargeToolUse,
       claimDailyDrop,
@@ -233,6 +304,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, payChips, completeLesson, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
   );
 });

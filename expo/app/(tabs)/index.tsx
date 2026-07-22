@@ -4,6 +4,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ChipIcon from "@/components/ChipIcon";
+import DailyGoalBar from "@/components/DailyGoalBar";
 import PlayingCard from "@/components/PlayingCard";
 import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
@@ -139,6 +140,8 @@ export default function LearnScreen() {
             {streakBroken && <Text style={styles.streakRestore}>Restore ›</Text>}
           </Pressable>
         </View>
+
+        <DailyGoalBar />
 
         <View style={styles.hero}>
           <View style={styles.heroFelt} />

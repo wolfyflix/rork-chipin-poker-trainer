@@ -1,11 +1,13 @@
-import React, { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import ChipIcon from "@/components/ChipIcon";
+import DailyGoalBar from "@/components/DailyGoalBar";
 import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
+import { restorePurchases, isPurchasesConfigured } from "@/lib/revenuecat";
 import { useGame } from "@/providers/GameProvider";
 
 const LIT_DAYS = new Set([9, 10, 12, 15, 16, 17, 22, 23, 24, 25]);
@@ -14,9 +16,38 @@ const CHIPS_WEEK = [120, 205, 0, 340, 180, 75, 0];
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { chips, streak, completed, biggestPot, pro, usesLeft, lives, openPaywall } = useGame();
+  const { chips, streak, completed, biggestPot, pro, usesLeft, lives, openPaywall, refreshProStatus, dailyXp, dailyGoalMet, dailyGoal } = useGame();
+  const [restoring, setResting] = useState<boolean>(false);
+  const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
   const maxWeek = useMemo(() => Math.max(...CHIPS_WEEK, 1), []);
+
+  const handleRestore = useCallback(async () => {
+    if (!isPurchasesConfigured()) {
+      setRestoreMsg("Purchases aren't available in this build.");
+      setTimeout(() => setRestoreMsg(null), 3000);
+      return;
+    }
+    setResting(true);
+    const res = await restorePurchases();
+    setResting(false);
+    if (res.ok) {
+      await refreshProStatus();
+      setRestoreMsg("Pro restored 👑 — welcome back.");
+    } else if (!res.cancelled) {
+      setRestoreMsg(res.error);
+    } else {
+      setRestoreMsg("No active purchases to restore.");
+    }
+    setTimeout(() => setRestoreMsg(null), 3000);
+  }, [refreshProStatus]);
+
+  const openLink = useCallback((url: string) => {
+    Linking.openURL(url).catch(() => {
+      setRestoreMsg("Couldn't open the link.");
+      setTimeout(() => setRestoreMsg(null), 3000);
+    });
+  }, []);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -32,6 +63,8 @@ export default function ProfileScreen() {
             <Text style={styles.handle}>@cjwolf · joined July 2026</Text>
           </View>
         </View>
+
+        <DailyGoalBar />
 
         <View style={styles.tileGrid}>
           <View style={styles.tile}>
@@ -108,7 +141,26 @@ export default function ProfileScreen() {
               : `Unit 1 + ${usesLeft} tool runs left today. Pro removes every limit.`}
           </Text>
           {!pro && <PressButton label="See Pro plans" variant="gold" onPress={() => openPaywall()} testID="see-pro" />}
+          <PressButton
+            label={restoring ? "Restoring…" : "Restore purchases"}
+            variant="ghost"
+            onPress={handleRestore}
+            disabled={restoring}
+            testID="restore-purchases"
+          />
+          {restoreMsg ? <Text style={styles.restoreMsg}>{restoreMsg}</Text> : null}
         </View>
+
+        <View style={styles.legalRow}>
+          <Pressable onPress={() => openLink("https://chipin.app/terms")} testID="terms-link">
+            <Text style={styles.legalLink}>Terms of Service</Text>
+          </Pressable>
+          <Text style={styles.legalDot}>·</Text>
+          <Pressable onPress={() => openLink("https://chipin.app/privacy")} testID="privacy-link">
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.versionText}>ChipIn v1.0.0 · Made for the home game</Text>
       </ScrollView>
     </View>
   );
@@ -234,5 +286,34 @@ const styles = StyleSheet.create({
     fontFamily: "Outfit_600SemiBold",
     marginBottom: 12,
     lineHeight: 19,
+  },
+  restoreMsg: {
+    textAlign: "center",
+    fontSize: 12.5,
+    fontFamily: "Outfit_700Bold",
+    color: colors.mint2,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  legalRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 16,
+  },
+  legalLink: {
+    fontSize: 12.5,
+    fontFamily: "Outfit_700Bold",
+    color: colors.mint,
+  },
+  legalDot: { color: colors.dim, fontSize: 12.5 },
+  versionText: {
+    textAlign: "center",
+    fontSize: 11,
+    fontFamily: "Outfit_600SemiBold",
+    color: colors.dim,
+    marginTop: 6,
+    marginBottom: 4,
   },
 });

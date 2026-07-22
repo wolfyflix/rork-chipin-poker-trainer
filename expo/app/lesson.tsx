@@ -80,7 +80,7 @@ export default function LessonScreen() {
   const params = useLocalSearchParams<{ unitId: string; lessonId: string; reward: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { completed, completeLesson, payChips, streak, loseLife } = useGame();
+  const { completed, completeLesson, payChips, streak, loseLife, awardXp } = useGame();
 
   const unit = useMemo(() => CURRICULUM.find((u) => u.id === params.unitId), [params.unitId]);
   const lesson = useMemo(() => unit?.lessons.find((l) => l.id === params.lessonId), [unit, params.lessonId]);
@@ -117,14 +117,18 @@ export default function LessonScreen() {
   }, [lesson, i]);
 
   const showFB = useCallback((good: boolean, rightTxt: string, wrongTxt: string) => {
-    if (good) setCorrect((c) => c + 1);
-    else loseLife(); // wrong answer costs a life
+    if (good) {
+      setCorrect((c) => c + 1);
+      awardXp();
+    } else {
+      loseLife(); // wrong answer costs a life
+    }
     setFeedback({
       good,
       title: good ? RIGHT_TITLES[Math.floor(Math.random() * RIGHT_TITLES.length)] : "Not quite — −1 life 💀",
       text: good ? rightTxt : wrongTxt,
     });
-  }, [loseLife]);
+  }, [loseLife, awardXp]);
 
   const answerMC = useCallback(
     (pos: number) => {

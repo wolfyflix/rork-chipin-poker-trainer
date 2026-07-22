@@ -393,3 +393,31 @@ export const SQUAD: SquadMember[] = [
   { n: "Tori", a: "🌺", chips: 3465, st: 3 },
   { n: "Brandon", a: "🏈", chips: 1085, st: 0 },
 ];
+
+/**
+ * Seed entries for the Global leaderboard (Stage 1 placeholder — Stage 2 will
+ * replace this with a live Supabase query). Bankrolls are staged so a new
+ * player with the 5000 starting stack lands around the middle of the board
+ * and can climb by earning chips.
+ */
+export interface GlobalSeed {
+  n: string;
+  a: string;
+  chips: number;
+  st: number;
+  cc: string; // country flag emoji
+}
+
+export const GLOBAL_SEED: GlobalSeed[] = [
+  { n: "VegasVic", a: "👑", chips: 184200, st: 47, cc: "🇺🇸" },
+  { n: "RiverRat", a: "🐀", chips: 121500, st: 39, cc: "🇨🇦" },
+  { n: "AllInAnnie", a: "💥", chips: 98700, st: 33, cc: "🇬🇧" },
+  { n: "FlopTurnRiver", a: "🌊", chips: 76300, st: 28, cc: "🇦🇺" },
+  { n: "BluffKing", a: "🤡", chips: 54200, st: 22, cc: "🇧🇷" },
+  { n: "SetMineSam", a: "⛏️", chips: 38900, st: 19, cc: "🇩🇪" },
+  { n: "PocketAces", a: "🃏", chips: 27400, st: 15, cc: "🇸🇪" },
+  { n: "TiltTamer", a: "🧘", chips: 18600, st: 12, cc: "🇯🇵" },
+  { n: "DonkeyDan", a: "🐴", chips: 9200, st: 8, cc: "🇲🇽" },
+  { n: "FishNChips", a: "🐟", chips: 3400, st: 5, cc: "🇮🇪" },
+  { n: "NewbieNick", a: "🐣", chips: 1200, st: 2, cc: "🇫🇷" },
+];
