@@ -1,14 +1,19 @@
 // @ts-nocheck
 import * as ImageManipulator from "expo-image-manipulator";
 
-const DEFAULT_MAX_BYTES = 3_000_000;
+const DEFAULT_MAX_BYTES = 4_000_000;
 
+/**
+ * Higher-resolution ladder for card recognition.
+ * Cards on a poker table are small — we need to preserve as much
+ * detail as possible while staying under Vercel's 4.5 MB body limit.
+ * Start at 1536px with high quality, step down only if needed.
+ */
 const LADDER = [
-  { width: 1280, compress: 0.82 },
-  { width: 1024, compress: 0.78 },
-  { width: 832, compress: 0.74 },
-  { width: 640, compress: 0.7 },
-  { width: 512, compress: 0.65 },
+  { width: 1536, compress: 0.9 },
+  { width: 1280, compress: 0.85 },
+  { width: 1024, compress: 0.8 },
+  { width: 832, compress: 0.75 },
 ] as const;
 
 const stripDataUriPrefix = (b64: string): string => {
@@ -30,6 +35,7 @@ const base64ByteLength = (b64: string): number => {
 /**
  * Resize an Expo image URI into a raw-base64 JPEG that fits inside the
  * Vercel request-body limit for image input requests.
+ * Uses a high-resolution ladder to preserve card detail.
  */
 export async function resizeForUpload(
   imageUri: string,

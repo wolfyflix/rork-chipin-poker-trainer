@@ -1,6 +1,6 @@
 /**
  * AI-powered playing card recognition via the Rork Toolkit vision proxy.
- * Sends a photo of a poker table to a free vision LLM (zai/glm-4.6v-flash),
+ * Sends a photo of a poker table to Google Gemini 3.5 Flash (strong vision model),
  * asks it to identify each visible card (rank + suit), and returns parsed Card objects.
  *
  * Card = { r: 2..14, s: 0..3 } — same shape as the poker engine.
@@ -12,7 +12,12 @@ import { resizeForUpload } from "./resize-for-upload";
 const TOOLKIT_URL = process.env.EXPO_PUBLIC_TOOLKIT_URL;
 const SECRET_KEY = process.env.EXPO_PUBLIC_RORK_TOOLKIT_SECRET_KEY;
 
-const MODEL_ID = "zai/glm-4.6v-flash";
+/**
+ * Google Gemini 3.5 Flash — excellent vision/OCR capabilities,
+ * very affordable ($1.5/M input tokens). Much more accurate than
+ * free flash-tier models for reading small text/symbols on cards.
+ */
+const MODEL_ID = "google/gemini-3.5-flash";
 
 const RANK_MAP: Record<string, number> = {
   "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
@@ -55,7 +60,6 @@ function parseCardToken(token: string): Card | null {
   }
 
   // Try letter/digit-first format like "AH", "10S", "KD"
-  // Ace can be "A", rank can be "10" or single digit/letter
   const m = clean.match(/^([a-z]?|10)([shdc♠♥♦♣])$/);
   if (m) {
     const r = RANK_MAP[m[1]];
@@ -64,7 +68,7 @@ function parseCardToken(token: string): Card | null {
   }
 
   // Try longer formats: "aceofspades", "kingofhearts"
-  const longMatch = clean.match(/^([2-9]|10|[ajqk])(?:of)?([shdc]|spades?|hearts?|diamonds?|clubs?|♠♥♦♣)$/);
+  const longMatch = clean.match(/^([2-9]|10|[ajqk])(?:of)?([shdc]|spades?|hearts?|diamonds?|clubs?|♠♥♦♣])$/);
   if (longMatch) {
     const r = RANK_MAP[longMatch[1]];
     const s = SUIT_MAP[longMatch[2]];
@@ -90,19 +94,19 @@ function parseScanResponse(text: string): ScanResult {
     try {
       const obj = JSON.parse(jsonMatch[0]);
       if (Array.isArray(obj.board)) {
-        obj.board.slice(0, 5).forEach((t: string, i: number) => {
+        obj.board.slice(0, 5).forEach((t: unknown, i: number) => {
           const c = parseCardToken(String(t));
           if (c) board[i] = c;
         });
       }
       if (Array.isArray(obj.hero)) {
-        obj.hero.slice(0, 2).forEach((t: string, i: number) => {
+        obj.hero.slice(0, 2).forEach((t: unknown, i: number) => {
           const c = parseCardToken(String(t));
           if (c) hero[i] = c;
         });
       }
       if (Array.isArray(obj.opponent)) {
-        obj.opponent.slice(0, 2).forEach((t: string, i: number) => {
+        obj.opponent.slice(0, 2).forEach((t: unknown, i: number) => {
           const c = parseCardToken(String(t));
           if (c) opponent[i] = c;
         });
@@ -159,7 +163,7 @@ function parseScanResponse(text: string): ScanResult {
 
 /**
  * Scan a photo of a poker table and recognize the cards.
- * Uses the free zai/glm-4.6v-flash vision model via the Rork Toolkit proxy.
+ * Uses Google Gemini 3.5 Flash — strong vision/OCR model — via the Rork Toolkit proxy.
  *
  * @param imageUri - local URI from expo-image-picker
  * @returns parsed cards for board, hero, and opponent
@@ -169,26 +173,36 @@ export async function scanCards(imageUri: string): Promise<ScanResult> {
     throw new Error("AI scanner not configured — missing toolkit credentials.");
   }
 
-  const { base64 } = await resizeForUpload(imageUri, 3_000_000);
+  const { base64 } = await resizeForUpload(imageUri, 4_000_000);
 
-  const prompt = `You are a poker card recognition expert. Look at this photo of a poker table and identify ALL visible playing cards.
+  const prompt = `You are an expert at reading playing cards from photos. You are looking at a photo of a poker table.
 
-Identify cards in three groups:
-1. BOARD (community cards in the center of the table) — up to 5 cards
-2. HERO (the player's hand, usually closest/bottom) — exactly 2 cards
-3. OPPONENT (the other player's hand, if visible) — up to 2 cards
+TASK: Identify every visible playing card in the photo. For each card, determine its RANK and SUIT.
 
-For each card, use the format: Rank + Suit letter, where:
-- Rank: 2-9, T (for 10), J, Q, K, A
-- Suit: S (spades ♠), H (hearts ♥), D (diamonds ♦), C (clubs ♣)
+RANKS: 2, 3, 4, 5, 6, 7, 8, 9, 10, J (Jack), Q (Queen), K (King), A (Ace)
+SUITS: S (Spades ♠), H (Hearts ♥), D (Diamonds ♦), C (Clubs ♣)
 
-Examples: "AH" = Ace of Hearts, "TD" = Ten of Diamonds, "2C" = Two of Clubs
+CARDS ARE ORGANIZED IN THREE GROUPS:
+1. "board" — community cards in the CENTER of the table (0 to 5 cards). These may be in a row or fanned out.
+2. "hero" — the cards belonging to the person whose perspective the photo is from, usually at the BOTTOM of the image, closest to the camera. Exactly 2 cards if visible.
+3. "opponent" — the other player's cards, if they are visible/shown (up to 2 cards). Often NOT visible unless it's a showdown.
 
-Respond ONLY with a JSON object, no other text:
+HOW TO READ A CARD:
+- Look at the rank number/letter printed in the corner(s) of the card.
+- Look at the suit symbol (♠ ♥ ♦ ♣) printed next to the rank.
+- Hearts and Diamonds are RED. Spades and Clubs are BLACK.
+- "10" may appear as "10" or sometimes just "T".
+- If a card is face-down or you cannot clearly see it, DO NOT include it.
+
+OUTPUT FORMAT — respond with ONLY a JSON object, no other text:
 {"board": ["AH","KS","2D","5C","9H"], "hero": ["QC","7S"], "opponent": ["JS","3D"]}
 
-If you cannot see a card or a group, use an empty array for that group.
-Only include cards you can clearly see. Do not guess.`;
+Rules:
+- Use the format RankSuit with no space (e.g. "AH", "10S", "KD", "2C").
+- Use empty arrays for any group where no cards are visible.
+- Only include cards you can clearly identify. Do not guess.
+- Do not include face-down cards.
+- If the same card appears multiple times, include it only once.`;
 
   const body = {
     model: MODEL_ID,
@@ -206,7 +220,7 @@ Only include cards you can clearly see. Do not guess.`;
         ],
       },
     ],
-    max_tokens: 500,
+    max_tokens: 800,
     temperature: 0.1,
   };
 
