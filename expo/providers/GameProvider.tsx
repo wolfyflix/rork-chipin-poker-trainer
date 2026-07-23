@@ -2,7 +2,18 @@ import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { supabase } from "@/lib/supabase";
 import { fetchCustomerInfo, hasProEntitlement, isPurchasesConfigured } from "@/lib/revenuecat";
+import {
+  loadFriends as loadFriendsDb,
+  findUserByHandle,
+  sendRequest as sendRequestDb,
+  acceptRequest as acceptRequestDb,
+  declineRequest as declineRequestDb,
+  removeFriendDb,
+  type FriendProfile,
+} from "@/lib/friends";
+import { useAuth } from "@/providers/AuthProvider";
 
 /** YYYY-MM-DD for the local day. Used to bucket daily-goal XP. */
 function todayKey(d: Date = new Date()): string {
@@ -75,12 +86,19 @@ export const XP_PER_CORRECT = 10;
  *  - Streak: broken when you skip a day; can be restored once for STREAK_RECOVERY_COST chips.
  */
 export const [GameProvider, useGame] = createContextHook(() => {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const isAuthed = !!userId;
+
   const [chips, setChips] = useState<number>(START_BANKROLL);
-  const [streak, setStreak] = useState<number>(4);
+  const [streak, setStreak] = useState<number>(0);
   const [streakBroken, setStreakBroken] = useState<boolean>(false);
   const [streakRecoveredToday, setStreakRecoveredToday] = useState<boolean>(false);
-  const [completed, setCompleted] = useState<Set<string>>(new Set(["u1l1", "u1l2"]));
+  const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [pro, setPro] = useState<boolean>(false);
+  const [playerName, setPlayerName] = useState<string>("Player");
+  const [playerHandle, setPlayerHandle] = useState<string>("player");
+  const [playerAvatar, setPlayerAvatar] = useState<string>("🦈");
 
   // Daily goal tracking — Duolingo-style. Persists the date bucket and XP earned that day.
   const [dailyXp, setDailyXp] = useState<number>(0);
@@ -96,15 +114,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [paywallMessage, setPaywallMessage] = useState<string | null>(null);
   const deltaId = useRef<number>(0);
 
-  // Friends list — Stage 1 uses local seed data; Stage 2 syncs with Supabase.
-  const [friends, setFriends] = useState<Friend[]>([
-    { id: "f1", name: "Dev", avatar: "🧢", online: true, chips: 8420 },
-    { id: "f2", name: "Mike", avatar: "🎧", online: true, chips: 6730 },
-    { id: "f3", name: "Tori", avatar: "🌺", online: false, chips: 3465 },
-    { id: "f4", name: "Brandon", avatar: "🏈", online: false, chips: 1085 },
-    { id: "f5", name: "Sam", avatar: "🎯", online: true, chips: 4200 },
-    { id: "f6", name: "Riley", avatar: "🎲", online: false, chips: 2150 },
-  ]);
+  // Friends list — starts empty on a fresh account. Stage 2 syncs with Supabase.
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [pendingInvites, setPendingInvites] = useState<string[]>([]);
   const [tableConfig, setTableConfig] = useState<TableConfig | null>(null);
   const [invitedToTable, setInvitedToTable] = useState<Set<string>>(new Set());
@@ -112,6 +123,128 @@ export const [GameProvider, useGame] = createContextHook(() => {
   // Lives — start full, refill on a timer.
   const [lives, setLives] = useState<number>(MAX_LIVES);
   const [nextLifeAt, setNextLifeAt] = useState<number | null>(null);
+
+  /** Hydrate game state from Supabase when the user signs in. */
+  useEffect(() => {
+    if (!userId) {
+      // Reset to fresh defaults when signed out
+      setChips(START_BANKROLL);
+      setStreak(0);
+      setStreakBroken(false);
+      setStreakRecoveredToday(false);
+      setCompleted(new Set());
+      setBiggestPot(0);
+      setHighs({ whw: 0, outs: 0, swipe: 0, beat: 0, name: 0, move: 0 });
+      setDailyXp(0);
+      setDailyGoalMet(false);
+      setDailyClaimed(false);
+      setFriends([]);
+      setPlayerName("Player");
+      setPlayerHandle("player");
+      setPlayerAvatar("🦈");
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .single();
+        if (cancelled || error || !data) return;
+
+        setChips(data.chips ?? START_BANKROLL);
+        setStreak(data.streak ?? 0);
+        setStreakBroken(data.streak_broken ?? false);
+        setPlayerName(data.name ?? "Player");
+        setPlayerHandle(data.handle ?? "player");
+        setPlayerAvatar(data.avatar ?? "🦈");
+        setBiggestPot(data.biggest_pot ?? 0);
+        if (data.arena_highs) {
+          setHighs({
+            whw: data.arena_highs.whw ?? 0,
+            outs: data.arena_highs.outs ?? 0,
+            swipe: data.arena_highs.swipe ?? 0,
+            beat: data.arena_highs.beat ?? 0,
+            name: data.arena_highs.name ?? 0,
+            move: data.arena_highs.move ?? 0,
+          });
+        }
+        if (data.completed_lessons && Array.isArray(data.completed_lessons)) {
+          setCompleted(new Set(data.completed_lessons));
+        }
+        if (data.daily_date === todayKey()) {
+          setDailyXp(data.daily_xp ?? 0);
+          setDailyGoalMet(data.daily_goal_met ?? false);
+        }
+        if (data.is_pro) setPro(true);
+      } catch {
+        /* fail soft — keep local state */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  /** Load friends from Supabase when the user signs in. */
+  useEffect(() => {
+    if (!userId) {
+      setFriends([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const dbFriends = await loadFriendsDb(userId);
+      if (cancelled) return;
+      setFriends(dbFriends.map((f: FriendProfile) => ({
+        id: f.id,
+        name: f.name,
+        avatar: f.avatar,
+        online: f.online,
+        chips: f.chips,
+      })));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  /** Debounced write of key game state to Supabase. Fires 2s after the last change. */
+  useEffect(() => {
+    if (!userId) return;
+    const timer = setTimeout(() => {
+      (async () => {
+        try {
+          await supabase
+            .from("profiles")
+            .update({
+              chips,
+              streak,
+              streak_broken: streakBroken,
+              completed_lessons: Array.from(completed),
+              daily_xp: dailyXp,
+              daily_date: dailyDate,
+              daily_goal_met: dailyGoalMet,
+              biggest_pot: biggestPot,
+              arena_highs: highs,
+              is_pro: pro,
+              name: playerName,
+              handle: playerHandle,
+              avatar: playerAvatar,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", userId);
+        } catch {
+          /* ignore — offline-safe, local state is source of truth */
+        }
+      })();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [userId, chips, streak, streakBroken, completed, dailyXp, dailyDate, dailyGoalMet, biggestPot, highs, pro, playerName, playerHandle, playerAvatar]);
 
   /** Sync `pro` with RevenueCat customer info on mount, and whenever a purchase completes upstream. */
   useEffect(() => {
@@ -294,25 +427,25 @@ export const [GameProvider, useGame] = createContextHook(() => {
     setHardMode((h) => !h);
   }, []);
 
-  /** Add a friend by username (Stage 1 = local mock; Stage 2 = Supabase). */
-  const addFriend = useCallback((name: string): boolean => {
+  /** Add a friend by username — searches Supabase profiles and sends a friend request. */
+  const addFriend = useCallback(async (name: string): Promise<{ ok: boolean; error: string | null }> => {
     const clean = name.trim().replace(/^@/, "");
-    if (!clean) return false;
-    const exists = friends.some((f) => f.name.toLowerCase() === clean.toLowerCase());
-    if (exists) return false;
-    const avatars = ["🎲", "🎯", "🦊", "🐸", "🦁", "🐼", "🦉", "🐝"];
-    const newFriend: Friend = {
-      id: `f${Date.now()}`,
-      name: clean,
-      avatar: avatars[Math.floor(Math.random() * avatars.length)],
-      online: Math.random() > 0.5,
-      chips: Math.floor(500 + Math.random() * 5000),
-    };
-    setFriends((prev) => [...prev, newFriend]);
-    return true;
-  }, [friends]);
+    if (!clean) return { ok: false, error: "Drop a username first." };
+    if (!userId) return { ok: false, error: "Sign in to add friends." };
 
-  /** Remove a friend by id. */
+    const target = await findUserByHandle(clean);
+    if (!target) return { ok: false, error: `No user @${clean} found.` };
+    if (target.id === userId) return { ok: false, error: "Can't add yourself." };
+
+    const exists = friends.some((f) => f.id === target.id);
+    if (exists) return { ok: false, error: "Already friends." };
+
+    const res = await sendRequestDb(userId, target.id);
+    if (res.error) return { ok: false, error: res.error };
+    return { ok: true, error: null };
+  }, [userId, friends]);
+
+  /** Remove a friend by id (both directions in Supabase). */
   const removeFriend = useCallback((id: string) => {
     setFriends((prev) => prev.filter((f) => f.id !== id));
     setInvitedToTable((prev) => {
@@ -320,14 +453,37 @@ export const [GameProvider, useGame] = createContextHook(() => {
       next.delete(id);
       return next;
     });
-  }, []);
+    if (userId) {
+      removeFriendDb(userId, id).catch(() => { /* ignore */ });
+    }
+  }, [userId]);
 
-  /** Send a friend request by handle (Stage 1 = local mock). */
+  /** Send a friend request by handle (delegates to addFriend for Supabase). */
   const sendFriendRequest = useCallback((handle: string): boolean => {
     const clean = handle.trim().replace(/^@/, "");
     if (!clean) return false;
     setPendingInvites((prev) => [...prev, clean]);
     return true;
+  }, []);
+
+  /** Accept an incoming friend request. */
+  const acceptFriendRequest = useCallback(async (requestId: string, fromId: string): Promise<{ ok: boolean; error: string | null }> => {
+    if (!userId) return { ok: false, error: "Sign in first." };
+    const res = await acceptRequestDb(requestId, fromId, userId);
+    if (res.error) return { ok: false, error: res.error };
+    // Reload friends list
+    const dbFriends = await loadFriendsDb(userId);
+    setFriends(dbFriends.map((f: FriendProfile) => ({
+      id: f.id, name: f.name, avatar: f.avatar, online: f.online, chips: f.chips,
+    })));
+    return { ok: true, error: null };
+  }, [userId]);
+
+  /** Decline an incoming friend request. */
+  const declineFriendRequest = useCallback(async (requestId: string): Promise<{ ok: boolean; error: string | null }> => {
+    const res = await declineRequestDb(requestId);
+    if (res.error) return { ok: false, error: res.error };
+    return { ok: true, error: null };
   }, []);
 
   /** Start a table game with the given config. */
@@ -364,6 +520,13 @@ export const [GameProvider, useGame] = createContextHook(() => {
       completed,
       pro,
       setPro,
+      playerName,
+      setPlayerName,
+      playerHandle,
+      setPlayerHandle,
+      playerAvatar,
+      setPlayerAvatar,
+      isAuthed,
       usesLeft,
       biggestPot,
       highs,
@@ -385,6 +548,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
       addFriend,
       removeFriend,
       sendFriendRequest,
+      acceptFriendRequest,
+      declineFriendRequest,
       startTableGame,
       clearTableGame,
       toggleInviteFriend,
@@ -405,6 +570,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, addFriend, removeFriend, sendFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
   );
 });

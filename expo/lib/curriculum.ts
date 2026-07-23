@@ -838,13 +838,13 @@ export interface SquadMember {
   me?: boolean;
 }
 
-export const SQUAD: SquadMember[] = [
-  { n: "Dev", a: "🧢", chips: 8420, st: 11 },
-  { n: "cj (you)", a: "🦈", chips: 5000, st: 4, me: true },
-  { n: "Mike", a: "🎧", chips: 6730, st: 6 },
-  { n: "Tori", a: "🌺", chips: 3465, st: 3 },
-  { n: "Brandon", a: "🏈", chips: 1085, st: 0 },
-];
+/**
+ * Stage 1: The Friends leaderboard is built dynamically from the user's friend list
+ * (in GameProvider) plus the user themselves. This interface is kept for type
+ * compatibility but SQUAD is now an empty array — real data comes from Supabase
+ * in Phase 2.
+ */
+export const SQUAD: SquadMember[] = [];
 
 /**
  * Seed entries for the Global leaderboard (Stage 1 placeholder — Stage 2 will

@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 
 import ChipIcon from "@/components/ChipIcon";
 import DailyGoalBar from "@/components/DailyGoalBar";
@@ -8,6 +9,7 @@ import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
 import { restorePurchases, isPurchasesConfigured } from "@/lib/revenuecat";
+import { useAuth } from "@/providers/AuthProvider";
 import { useGame } from "@/providers/GameProvider";
 
 const LIT_DAYS = new Set([9, 10, 12, 15, 16, 17, 22, 23, 24, 25]);
@@ -16,7 +18,9 @@ const CHIPS_WEEK = [120, 205, 0, 340, 180, 75, 0];
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { chips, streak, completed, biggestPot, pro, usesLeft, lives, openPaywall, refreshProStatus, dailyXp, dailyGoalMet, dailyGoal } = useGame();
+  const router = useRouter();
+  const { user, isAuthed, signOut } = useAuth();
+  const { chips, streak, completed, biggestPot, pro, usesLeft, lives, openPaywall, refreshProStatus, dailyXp, dailyGoalMet, dailyGoal, playerName, playerHandle, playerAvatar } = useGame();
   const [restoring, setResting] = useState<boolean>(false);
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
@@ -49,6 +53,14 @@ export default function ProfileScreen() {
     });
   }, []);
 
+  const goToAuth = useCallback(() => {
+    router.push("/auth");
+  }, [router]);
+
+  const handleSignOut = useCallback(async () => {
+    await signOut();
+  }, [signOut]);
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
@@ -56,11 +68,11 @@ export default function ProfileScreen() {
 
         <View style={styles.head}>
           <View style={styles.ava}>
-            <Text style={styles.avaText}>🦈</Text>
+            <Text style={styles.avaText}>{playerAvatar}</Text>
           </View>
           <View>
-            <Text style={styles.name}>cj</Text>
-            <Text style={styles.handle}>@cjwolf · joined July 2026</Text>
+            <Text style={styles.name}>{playerName}</Text>
+            <Text style={styles.handle}>@{playerHandle} · {isAuthed ? "signed in" : "guest — sign up to save progress"}</Text>
           </View>
         </View>
 
@@ -149,6 +161,23 @@ export default function ProfileScreen() {
             testID="restore-purchases"
           />
           {restoreMsg ? <Text style={styles.restoreMsg}>{restoreMsg}</Text> : null}
+        </View>
+
+        {/* Account section */}
+        <View style={styles.subCard}>
+          <Text style={styles.sectionLabel}>Account</Text>
+          {isAuthed ? (
+            <>
+              <Text style={styles.accountEmail}>{user?.email ?? "Signed in"}</Text>
+              <PressButton label="Sign out" variant="ghost" onPress={handleSignOut} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.accountEmail}>Playing as guest</Text>
+              <Text style={styles.subCopy}>Create an account to save your progress, sync across devices, and add friends.</Text>
+              <PressButton label="Sign up / Sign in" onPress={goToAuth} />
+            </>
+          )}
         </View>
 
         <View style={styles.legalRow}>
@@ -294,6 +323,12 @@ const styles = StyleSheet.create({
     color: colors.mint2,
     marginTop: 6,
     marginBottom: 4,
+  },
+  accountEmail: {
+    fontSize: 14,
+    fontFamily: "Outfit_700Bold",
+    color: colors.cream,
+    marginBottom: 12,
   },
   legalRow: {
     flexDirection: "row",

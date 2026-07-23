@@ -31,7 +31,7 @@ function LivesHeart({ filled }: { filled: boolean }) {
 }
 
 export default function LearnScreen() {
-  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak } = useGame();
+  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak, playerName, isAuthed } = useGame();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [notice, setNotice] = useState<string | null>(null);
@@ -146,7 +146,7 @@ export default function LearnScreen() {
         <View style={styles.hero}>
           <View style={styles.heroFelt} />
           <View style={styles.heroContent}>
-            <Text style={styles.heroTitle}>Yo cj, ready to{"\n"}take their chips?</Text>
+            <Text style={styles.heroTitle}>{isAuthed ? `Yo ${playerName},` : "Welcome!"}{"\n"}{isAuthed ? "ready to take their chips?" : "learn poker, take chips."}</Text>
             <Text style={styles.heroSub}>Lessons are free. Get one right, earn chips. Get it wrong, lose a life.</Text>
           </View>
           <View style={styles.fan}>

@@ -1,10 +1,11 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -13,13 +14,16 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { UserPlus, Wifi, WifiOff, Trash2, Spade, Send } from "lucide-react-native";
+import * as Linking from "expo-linking";
+import { UserPlus, Wifi, WifiOff, Trash2, Spade, Send, Check, X } from "lucide-react-native";
 
 import ChipIcon from "@/components/ChipIcon";
 import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
-import { GLOBAL_SEED, SQUAD } from "@/lib/curriculum";
+import { GLOBAL_SEED } from "@/lib/curriculum";
+import { loadIncomingRequests, type FriendRequestRow } from "@/lib/friends";
+import { useAuth } from "@/providers/AuthProvider";
 import { useGame } from "@/providers/GameProvider";
 
 const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
@@ -42,21 +46,29 @@ interface LeaderRow {
 export default function SquadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { chips, streak, friends, addFriend, removeFriend, sendFriendRequest, invitedToTable, toggleInviteFriend } = useGame();
+  const { user } = useAuth();
+  const { chips, streak, friends, addFriend, removeFriend, acceptFriendRequest, declineFriendRequest, invitedToTable, toggleInviteFriend, playerName, playerAvatar, playerHandle, isAuthed } = useGame();
   const [tab, setTab] = useState<Tab>("friends");
   const [notice, setNotice] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState<boolean>(false);
   const [handle, setHandle] = useState<string>("");
   const [inviteMode, setInviteMode] = useState<boolean>(false);
+  const [requests, setRequests] = useState<FriendRequestRow[]>([]);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const friendsRows = useMemo<LeaderRow[]>(() => {
-    const rows = SQUAD.map((m) => (m.me ? { ...m, chips, st: streak } : m));
-    return rows.sort((a, b) => b.chips - a.chips);
-  }, [chips, streak]);
+    const me: LeaderRow = { n: playerName, a: playerAvatar, chips, st: streak, me: true };
+    const friendRows: LeaderRow[] = friends.map((f) => ({
+      n: f.name,
+      a: f.avatar,
+      chips: f.chips,
+      st: 0,
+    }));
+    return [...friendRows, me].sort((a, b) => b.chips - a.chips);
+  }, [chips, streak, friends, playerName, playerAvatar]);
 
   const globalRows = useMemo<LeaderRow[]>(() => {
-    const me: LeaderRow = { n: "you", a: "\u{1F99B}", chips, st: streak, me: true, country: "\u{1F1FA}\u{1F1F8}" };
+    const me: LeaderRow = { n: playerName, a: playerAvatar, chips, st: streak, me: true, country: "\u{1F1FA}\u{1F1F8}" };
     const seeded: LeaderRow[] = GLOBAL_SEED.map((g) => ({
       n: g.n,
       a: g.a,
@@ -84,24 +96,34 @@ export default function SquadScreen() {
     noticeTimer.current = setTimeout(() => setNotice(null), 2300);
   }, []);
 
-  const invite = useCallback(() => {
-    flash("Invite link copied — send it to the gc \u{1F517}");
-  }, [flash]);
+  const invite = useCallback(async () => {
+    const link = Linking.createURL(`invite?ref=${user?.id ?? playerHandle}`);
+    try {
+      await Share.share({
+        message: `Join me on ChipIn — let's play poker. ${link}`,
+        url: link,
+        title: "ChipIn invite",
+      });
+      flash("Invite sent \u{1F517}");
+    } catch {
+      flash("Couldn't open share sheet");
+    }
+  }, [user, playerHandle, flash]);
 
-  const sendRequest = useCallback(() => {
+  const sendRequest = useCallback(async () => {
     const clean = handle.trim().replace(/^@/, "");
     if (!clean) {
       flash("Drop a username first \u270B");
       return;
     }
-    const added = addFriend(clean);
-    if (added) {
-      flash(`@${clean} added to your friends! \u{1F91D}`);
+    const res = await addFriend(clean);
+    if (res.ok) {
+      flash(`Request sent to @${clean}! \u{1F91D}`);
+      setAddOpen(false);
+      setHandle("");
     } else {
-      flash(`You're already friends with @${clean}`);
+      flash(res.error ?? `Couldn't add @${clean}`);
     }
-    setAddOpen(false);
-    setHandle("");
   }, [handle, flash, addFriend]);
 
   const handleRemoveFriend = useCallback((id: string, name: string) => {
@@ -122,6 +144,40 @@ export default function SquadScreen() {
   const goToTable = useCallback(() => {
     router.push("/(tabs)/table");
   }, [router]);
+
+  /** Load incoming friend requests when authed. */
+  useEffect(() => {
+    if (!user?.id) {
+      setRequests([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const rows = await loadIncomingRequests(user.id);
+      if (!cancelled) setRequests(rows);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  const handleAccept = useCallback(async (req: FriendRequestRow) => {
+    const res = await acceptFriendRequest(req.id, req.from_user_id);
+    if (res.ok) {
+      setRequests((prev) => prev.filter((r) => r.id !== req.id));
+      flash(`Accepted ${req.from_name}! \u{1F91D}`);
+    } else {
+      flash(res.error ?? "Couldn't accept");
+    }
+  }, [acceptFriendRequest, flash]);
+
+  const handleDecline = useCallback(async (req: FriendRequestRow) => {
+    const res = await declineFriendRequest(req.id);
+    if (res.ok) {
+      setRequests((prev) => prev.filter((r) => r.id !== req.id));
+      flash("Declined");
+    } else {
+      flash(res.error ?? "Couldn't decline");
+    }
+  }, [declineFriendRequest, flash]);
 
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
@@ -185,6 +241,40 @@ export default function SquadScreen() {
                   <Text style={styles.invitedBannerLink}>Go to Table {"\u2192"}</Text>
                 </Pressable>
               </View>
+            )}
+
+            {/* Incoming friend requests */}
+            {requests.length > 0 && (
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.gold2 }]}>
+                  {"\u{1F4E9}"}  FRIEND REQUESTS ({requests.length})
+                </Text>
+                {requests.map((req) => (
+                  <View key={req.id} style={styles.friendCard}>
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>{req.from_avatar}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>{req.from_name}</Text>
+                      <Text style={styles.friendMeta}>wants to be your friend</Text>
+                    </View>
+                    <Pressable style={styles.acceptBtn} onPress={() => handleAccept(req)}>
+                      <Check size={16} color={colors.mintInk} />
+                    </Pressable>
+                    <Pressable style={styles.declineBtn} onPress={() => handleDecline(req)}>
+                      <X size={16} color={colors.red} />
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
+
+            {/* Invite link button */}
+            {isAuthed && (
+              <Pressable style={styles.inviteLinkBtn} onPress={invite}>
+                <Send size={16} color={colors.mint} />
+                <Text style={styles.inviteLinkText}>Invite friends via link</Text>
+              </Pressable>
             )}
 
             {/* Online friends */}
@@ -282,59 +372,72 @@ export default function SquadScreen() {
             <View style={styles.leagueBand}>
               <Text style={styles.cup}>{"\u{1F3C6}"}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.leagueTitle}>The Basement Boys</Text>
+                <Text style={styles.leagueTitle}>Your Friends</Text>
                 <Text style={styles.leagueSub}>
-                  Biggest bankroll Sunday night takes the crown {" \u00b7 "} {SQUAD.length} members
+                  Biggest bankroll takes the crown {" \u00b7 "} {friends.length} friend{friends.length !== 1 ? "s" : ""}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.podiumRow}>
-              {podium.map((m, i) => (
-                <View
-                  key={`${m.n}-${i}`}
-                  style={[styles.podium, i === 0 && styles.podiumFirst, m.me && styles.podiumMe]}
-                >
-                  <Text style={styles.podiumMedal}>{MEDALS[i]}</Text>
-                  <View style={[styles.podiumAva, i === 0 && styles.podiumAvaFirst]}>
-                    <Text style={styles.podiumAvaText}>{m.a}</Text>
-                  </View>
-                  <Text style={styles.podiumName} numberOfLines={1}>{m.me ? "you" : m.n}</Text>
-                  <View style={styles.podiumChips}>
-                    <ChipIcon size={9} />
-                    <Text style={styles.podiumChipsNum}>{shortChips(m.chips)}</Text>
-                  </View>
-                  <Text style={styles.podiumStreak}>{"\u{1F525}"} {m.st}</Text>
-                </View>
-              ))}
-            </View>
-
-            {rest.map((m, i) => {
-              const rank = i + 4;
-              return (
-                <View key={`${m.n}-${i}`} style={[styles.row, m.me && styles.rowMe]}>
-                  <Text style={styles.rank}>#{rank}</Text>
-                  <View style={styles.ava}>
-                    <Text style={styles.avaText}>{m.a}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.name} numberOfLines={1}>{m.me ? "you" : m.n}</Text>
-                    <Text style={styles.st}>{"\u{1F525}"} {m.st} day streak</Text>
-                  </View>
-                  <View style={styles.bankroll}>
-                    <View style={styles.bankrollRow}>
-                      <ChipIcon size={11} />
-                      <Text style={styles.bankrollNum}>{m.chips.toLocaleString()}</Text>
+            {friends.length === 0 ? (
+              <View style={styles.emptyState2}>
+                <Text style={styles.emptyState2Emoji}>{"\u{1F91D}"}</Text>
+                <Text style={styles.emptyState2Title}>No friends on the board yet</Text>
+                <Text style={styles.emptyState2Text}>
+                  Add friends to compete on the friends leaderboard and invite them to poker games.
+                </Text>
+                <PressButton label="Add your first friend" onPress={() => setAddOpen(true)} style={{ marginTop: 16 }} />
+              </View>
+            ) : (
+              <>
+                <View style={styles.podiumRow}>
+                  {podium.map((m, i) => (
+                    <View
+                      key={`${m.n}-${i}`}
+                      style={[styles.podium, i === 0 && styles.podiumFirst, m.me && styles.podiumMe]}
+                    >
+                      <Text style={styles.podiumMedal}>{MEDALS[i]}</Text>
+                      <View style={[styles.podiumAva, i === 0 && styles.podiumAvaFirst]}>
+                        <Text style={styles.podiumAvaText}>{m.a}</Text>
+                      </View>
+                      <Text style={styles.podiumName} numberOfLines={1}>{m.me ? playerName : m.n}</Text>
+                      <View style={styles.podiumChips}>
+                        <ChipIcon size={9} />
+                        <Text style={styles.podiumChipsNum}>{shortChips(m.chips)}</Text>
+                      </View>
+                      <Text style={styles.podiumStreak}>{"\u{1F525}"} {m.st}</Text>
                     </View>
-                    <Text style={styles.bankrollK}>BANKROLL</Text>
-                  </View>
+                  ))}
                 </View>
-              );
-            })}
 
-            <PressButton label="\u2795 Add a friend" variant="ghost" onPress={() => setAddOpen(true)} style={styles.addBtn} />
-            <PressButton label="Invite the group chat \u{1F517}" onPress={invite} style={styles.inviteBtn} />
-            <Text style={styles.footer}>Screenshot this when you hit #1. You know you want to.</Text>
+                {rest.map((m, i) => {
+                  const rank = i + 4;
+                  return (
+                    <View key={`${m.n}-${i}`} style={[styles.row, m.me && styles.rowMe]}>
+                      <Text style={styles.rank}>#{rank}</Text>
+                      <View style={styles.ava}>
+                        <Text style={styles.avaText}>{m.a}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.name} numberOfLines={1}>{m.me ? playerName : m.n}</Text>
+                        <Text style={styles.st}>{"\u{1F525}"} {m.st} day streak</Text>
+                      </View>
+                      <View style={styles.bankroll}>
+                        <View style={styles.bankrollRow}>
+                          <ChipIcon size={11} />
+                          <Text style={styles.bankrollNum}>{m.chips.toLocaleString()}</Text>
+                        </View>
+                        <Text style={styles.bankrollK}>BANKROLL</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                <PressButton label="\u2795 Add a friend" variant="ghost" onPress={() => setAddOpen(true)} style={styles.addBtn} />
+                <PressButton label="Invite the group chat \u{1F517}" onPress={invite} style={styles.inviteBtn} />
+                <Text style={styles.footer}>Screenshot this when you hit #1. You know you want to.</Text>
+              </>
+            )}
           </>
         )}
 
@@ -361,7 +464,7 @@ export default function SquadScreen() {
                   <View style={[styles.podiumAva, i === 0 && styles.podiumAvaFirst]}>
                     <Text style={styles.podiumAvaText}>{m.a}</Text>
                   </View>
-                  <Text style={styles.podiumName} numberOfLines={1}>{m.me ? "you" : m.n}</Text>
+                  <Text style={styles.podiumName} numberOfLines={1}>{m.me ? playerName : m.n}</Text>
                   <View style={styles.podiumChips}>
                     <ChipIcon size={9} />
                     <Text style={styles.podiumChipsNum}>{shortChips(m.chips)}</Text>
@@ -393,7 +496,7 @@ export default function SquadScreen() {
                     <Text style={styles.avaText}>{m.a}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.name} numberOfLines={1}>{m.me ? "you" : m.n}</Text>
+                    <Text style={styles.name} numberOfLines={1}>{m.me ? playerName : m.n}</Text>
                     <Text style={styles.st}>
                       {m.country ? `${m.country} {" \u00b7 "}` : ""}{"\u{1F525}"} {m.st} day streak
                     </Text>
@@ -623,6 +726,44 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(228,87,61,0.08)",
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  acceptBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: colors.mint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  declineBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: "rgba(228,87,61,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(228,87,61,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inviteLinkBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: "rgba(198,238,199,0.08)",
+    borderWidth: 1,
+    borderColor: colors.mintDeep,
+  },
+  inviteLinkText: {
+    fontSize: 13.5,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.mint,
+    letterSpacing: 0.2,
   },
 
   emptyState2: {
