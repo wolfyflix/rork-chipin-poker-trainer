@@ -8,6 +8,7 @@ import PlayingCard from "@/components/PlayingCard";
 import PressButton from "@/components/PressButton";
 import colors from "@/constants/colors";
 import { OUTS_REF } from "@/lib/curriculum";
+import { scanCards, ScanResult } from "@/lib/cardScanner";
 import { Card, cardKey, myOdds, OddsResult, OddsVerdict, oddsVerdict, whoWon, WhoWonResult } from "@/lib/poker";
 import { useGame } from "@/providers/GameProvider";
 
@@ -62,6 +63,8 @@ export default function ToolsScreen() {
   const [outsSel, setOutsSel] = useState<number>(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [scanning, setScanning] = useState<boolean>(false);
+  const [scanTarget, setScanTarget] = useState<"who" | "odds">("who");
+  const [scanPreview, setScanPreview] = useState<ScanResult | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showNotice = useCallback((msg: string) => {
@@ -173,52 +176,71 @@ export default function ToolsScreen() {
     setPlayers((prev) => prev.filter((_, pi) => pi !== i));
   }, []);
 
-  /** Camera scan — opens the camera, snaps a photo, runs simulated detection, prefills cards. */
-  const scanTable = useCallback(async () => {
+  /** Camera scan — opens the camera, snaps a photo, sends it to the AI vision model to recognize cards, prefills slots. */
+  const doScan = useCallback(async (target: "who" | "odds") => {
+    setScanTarget(target);
     setScanning(true);
+    setScanPreview(null);
     try {
       const res = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.7,
+        quality: 0.8,
       });
       if (res.canceled || !res.assets?.length) {
         setScanning(false);
         return;
       }
-      // Simulated detection — preview v1. Real card-recognition model comes in a later version.
-      const used = new Set<number>();
-      const board: Card[] = [];
-      while (board.length < 5) {
-        const r = 2 + Math.floor(Math.random() * 13);
-        const s = Math.floor(Math.random() * 4);
-        const k = r * 4 + s;
-        if (!used.has(k)) { used.add(k); board.push({ r, s }); }
+      const uri = res.assets[0].uri;
+      const result = await scanCards(uri);
+      setScanPreview(result);
+
+      if (target === "who") {
+        // Prefill Who Won? — board + hero + one opponent
+        const filledBoard = result.board.filter(Boolean) as Card[];
+        if (filledBoard.length > 0) {
+          setWhoBoard([...filledBoard, ...Array(5 - filledBoard.length).fill(null)]);
+        }
+        const heroCards = result.hero.filter(Boolean) as Card[];
+        const oppCards = result.opponent.filter(Boolean) as Card[];
+        setPlayers([
+          { name: "Me", hole: heroCards.length === 2 ? heroCards : [heroCards[0] ?? null, heroCards[1] ?? null] },
+          { name: "Opponent", hole: oppCards.length === 2 ? oppCards : [oppCards[0] ?? null, oppCards[1] ?? null] },
+        ]);
+        setWhoResult(null);
+      } else {
+        // Prefill My Odds — hero + board only (opponent count is set via stepper)
+        const heroCards = result.hero.filter(Boolean) as Card[];
+        if (heroCards.length > 0) {
+          setOddsHero([heroCards[0] ?? null, heroCards[1] ?? null]);
+        }
+        const filledBoard = result.board.filter(Boolean) as Card[];
+        if (filledBoard.length > 0) {
+          setOddsBoard([...filledBoard, ...Array(5 - filledBoard.length).fill(null)]);
+        }
+        setOddsResult(null);
       }
-      const h1a: Card[] = [];
-      const h1b: Card[] = [];
-      while (h1a.length < 2) {
-        const r = 2 + Math.floor(Math.random() * 13);
-        const s = Math.floor(Math.random() * 4);
-        const k = r * 4 + s;
-        if (!used.has(k)) { used.add(k); h1a.push({ r, s }); }
+
+      const total = result.board.filter(Boolean).length + result.hero.filter(Boolean).length + result.opponent.filter(Boolean).length;
+      if (total === 0) {
+        showNotice("Couldn't read any cards from the photo. Tap the slots to enter them manually.");
+      } else if (result.confidence === "low") {
+        showNotice(`📸 Read ${total} card${total > 1 ? "s" : ""} — some may be wrong. Tap any slot to fix.`);
+      } else if (result.confidence === "partial") {
+        showNotice(`📸 Read ${total} cards — tap any slot to fix a wrong read.`);
+      } else {
+        showNotice("📸 Scan complete! Tap any slot to fix a wrong read.");
       }
-      while (h1b.length < 2) {
-        const r = 2 + Math.floor(Math.random() * 13);
-        const s = Math.floor(Math.random() * 4);
-        const k = r * 4 + s;
-        if (!used.has(k)) { used.add(k); h1b.push({ r, s }); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Scan failed.";
+      if (msg.includes("IMAGE_TOO_LARGE")) {
+        showNotice("Photo too large to process. Try again from a closer angle.");
+      } else if (msg.includes("not configured")) {
+        showNotice("AI scanner unavailable — tap the slots to enter cards manually.");
+      } else {
+        showNotice("Scan failed — tap the slots to enter cards manually.");
       }
-      setWhoBoard(board);
-      setPlayers([
-        { name: "Me", hole: h1a },
-        { name: "Mike", hole: h1b },
-      ]);
-      setWhoResult(null);
-      showNotice("📸 Scanned — cards prefilled (preview). Tap any slot to fix a wrong read.");
-    } catch {
-      showNotice("Camera unavailable — tap the slots to enter cards manually.");
     } finally {
       setScanning(false);
     }
@@ -342,11 +364,11 @@ export default function ToolsScreen() {
                 calls it using real ranking rules.
               </Text>
             </View>
-            <Pressable style={styles.scanBtn} onPress={scanTable} disabled={scanning} testID="scan-table">
+            <Pressable style={styles.scanBtn} onPress={() => doScan("who")} disabled={scanning} testID="scan-table">
               <Text style={styles.scanEmoji}>📸</Text>
-              <Text style={styles.scanText}>{scanning ? "Scanning…" : "Scan the table"}</Text>
+              <Text style={styles.scanText}>{scanning && scanTarget === "who" ? "Reading cards…" : "Scan the table"}</Text>
             </Pressable>
-            <Text style={styles.scanNote}>Preview — simulated detection. Tap any slot to fix a wrong read.</Text>
+            <Text style={styles.scanNote}>AI reads the cards from your photo. Tap any slot to fix a wrong read.</Text>
             <Pressable style={styles.exampleBtn} onPress={exWho} testID="example-who">
               <Text style={styles.exampleText}>👀 show me an example</Text>
             </Pressable>
@@ -439,6 +461,11 @@ export default function ToolsScreen() {
                 ⚠️ For reviewing hands after play—not for use during a live hand.
               </Text>
             </View>
+            <Pressable style={styles.scanBtn} onPress={() => doScan("odds")} disabled={scanning} testID="scan-odds">
+              <Text style={styles.scanEmoji}>📸</Text>
+              <Text style={styles.scanText}>{scanning && scanTarget === "odds" ? "Reading cards…" : "Scan the table"}</Text>
+            </Pressable>
+            <Text style={styles.scanNote}>AI reads your hand + board from the photo. Tap any slot to fix a wrong read.</Text>
             <Pressable style={styles.exampleBtn} onPress={exOdds} testID="example-odds">
               <Text style={styles.exampleText}>👀 show me an example</Text>
             </Pressable>
