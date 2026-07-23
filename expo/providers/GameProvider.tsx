@@ -21,6 +21,24 @@ export interface ArenaHighs {
   move: number;
 }
 
+/** A friend in the user's friend list. Stage 1 = local; Stage 2 syncs with Supabase. */
+export interface Friend {
+  id: string;
+  name: string;
+  avatar: string;
+  online: boolean;
+  chips: number;
+}
+
+/** Configuration for a table game session. */
+export interface TableConfig {
+  maxPlayers: number;
+  buyIn: number;
+  smallBlind: number;
+  bigBlind: number;
+  invitedFriendIds: string[];
+}
+
 interface DeltaEvent {
   id: number;
   amount: number;
@@ -77,6 +95,19 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [paywallVisible, setPaywallVisible] = useState<boolean>(false);
   const [paywallMessage, setPaywallMessage] = useState<string | null>(null);
   const deltaId = useRef<number>(0);
+
+  // Friends list — Stage 1 uses local seed data; Stage 2 syncs with Supabase.
+  const [friends, setFriends] = useState<Friend[]>([
+    { id: "f1", name: "Dev", avatar: "🧢", online: true, chips: 8420 },
+    { id: "f2", name: "Mike", avatar: "🎧", online: true, chips: 6730 },
+    { id: "f3", name: "Tori", avatar: "🌺", online: false, chips: 3465 },
+    { id: "f4", name: "Brandon", avatar: "🏈", online: false, chips: 1085 },
+    { id: "f5", name: "Sam", avatar: "🎯", online: true, chips: 4200 },
+    { id: "f6", name: "Riley", avatar: "🎲", online: false, chips: 2150 },
+  ]);
+  const [pendingInvites, setPendingInvites] = useState<string[]>([]);
+  const [tableConfig, setTableConfig] = useState<TableConfig | null>(null);
+  const [invitedToTable, setInvitedToTable] = useState<Set<string>>(new Set());
 
   // Lives — start full, refill on a timer.
   const [lives, setLives] = useState<number>(MAX_LIVES);
@@ -263,6 +294,64 @@ export const [GameProvider, useGame] = createContextHook(() => {
     setHardMode((h) => !h);
   }, []);
 
+  /** Add a friend by username (Stage 1 = local mock; Stage 2 = Supabase). */
+  const addFriend = useCallback((name: string): boolean => {
+    const clean = name.trim().replace(/^@/, "");
+    if (!clean) return false;
+    const exists = friends.some((f) => f.name.toLowerCase() === clean.toLowerCase());
+    if (exists) return false;
+    const avatars = ["🎲", "🎯", "🦊", "🐸", "🦁", "🐼", "🦉", "🐝"];
+    const newFriend: Friend = {
+      id: `f${Date.now()}`,
+      name: clean,
+      avatar: avatars[Math.floor(Math.random() * avatars.length)],
+      online: Math.random() > 0.5,
+      chips: Math.floor(500 + Math.random() * 5000),
+    };
+    setFriends((prev) => [...prev, newFriend]);
+    return true;
+  }, [friends]);
+
+  /** Remove a friend by id. */
+  const removeFriend = useCallback((id: string) => {
+    setFriends((prev) => prev.filter((f) => f.id !== id));
+    setInvitedToTable((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /** Send a friend request by handle (Stage 1 = local mock). */
+  const sendFriendRequest = useCallback((handle: string): boolean => {
+    const clean = handle.trim().replace(/^@/, "");
+    if (!clean) return false;
+    setPendingInvites((prev) => [...prev, clean]);
+    return true;
+  }, []);
+
+  /** Start a table game with the given config. */
+  const startTableGame = useCallback((config: TableConfig) => {
+    setTableConfig(config);
+    setInvitedToTable(new Set(config.invitedFriendIds));
+  }, []);
+
+  /** Clear the table game session. */
+  const clearTableGame = useCallback(() => {
+    setTableConfig(null);
+    setInvitedToTable(new Set());
+  }, []);
+
+  /** Toggle a friend's invite status for the current table game. */
+  const toggleInviteFriend = useCallback((friendId: string) => {
+    setInvitedToTable((prev) => {
+      const next = new Set(prev);
+      if (next.has(friendId)) next.delete(friendId);
+      else next.add(friendId);
+      return next;
+    });
+  }, []);
+
   /** The Table unlocks after N completed lessons. */
   const tableUnlocked = completed.size >= TABLE_UNLOCK_LESSONS;
 
@@ -289,6 +378,16 @@ export const [GameProvider, useGame] = createContextHook(() => {
       dailyXp,
       dailyGoalMet,
       dailyGoal: DAILY_GOAL_XP,
+      friends,
+      pendingInvites,
+      tableConfig,
+      invitedToTable,
+      addFriend,
+      removeFriend,
+      sendFriendRequest,
+      startTableGame,
+      clearTableGame,
+      toggleInviteFriend,
       payChips,
       completeLesson,
       awardXp,
@@ -306,6 +405,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, addFriend, removeFriend, sendFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
   );
 });
