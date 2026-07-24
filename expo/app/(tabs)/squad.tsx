@@ -22,9 +22,11 @@ import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
 import { GLOBAL_SEED } from "@/lib/curriculum";
+import { fetchGlobalLeaderboard, fetchFriendsLeaderboard, type LeaderEntry } from "@/lib/leaderboard";
 import { loadIncomingRequests, type FriendRequestRow } from "@/lib/friends";
 import { useAuth } from "@/providers/AuthProvider";
 import { useGame } from "@/providers/GameProvider";
+import { useQuery } from "@tanstack/react-query";
 
 const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
@@ -56,6 +58,7 @@ export default function SquadScreen() {
   const [requests, setRequests] = useState<FriendRequestRow[]>([]);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Real friends leaderboard — built from local friends state (already from Supabase)
   const friendsRows = useMemo<LeaderRow[]>(() => {
     const me: LeaderRow = { n: playerName, a: playerAvatar, chips, st: streak, me: true };
     const friendRows: LeaderRow[] = friends.map((f) => ({
@@ -67,7 +70,24 @@ export default function SquadScreen() {
     return [...friendRows, me].sort((a, b) => b.chips - a.chips);
   }, [chips, streak, friends, playerName, playerAvatar]);
 
+  // Real global leaderboard — fetched from Supabase via React Query
+  const { data: globalEntries } = useQuery<LeaderEntry[]>({
+    queryKey: ["global-leaderboard", user?.id],
+    queryFn: () => fetchGlobalLeaderboard(user?.id ?? null, 50),
+    staleTime: 60_000,
+  });
+
   const globalRows = useMemo<LeaderRow[]>(() => {
+    if (globalEntries && globalEntries.length > 0) {
+      return globalEntries.map((e) => ({
+        n: e.name,
+        a: e.avatar,
+        chips: e.chips,
+        st: e.streak,
+        me: e.isMe,
+      }));
+    }
+    // Fallback to seed data if Supabase query returns nothing (offline or no other players yet)
     const me: LeaderRow = { n: playerName, a: playerAvatar, chips, st: streak, me: true, country: "\u{1F1FA}\u{1F1F8}" };
     const seeded: LeaderRow[] = GLOBAL_SEED.map((g) => ({
       n: g.n,
@@ -76,9 +96,8 @@ export default function SquadScreen() {
       st: g.st,
       country: g.cc,
     }));
-    const all = [...seeded, me].sort((a, b) => b.chips - a.chips);
-    return all;
-  }, [chips, streak]);
+    return [...seeded, me].sort((a, b) => b.chips - a.chips);
+  }, [globalEntries, chips, streak, playerName, playerAvatar]);
 
   const rows = tab === "friends" ? friendsRows : tab === "global" ? globalRows : [];
   const myRank = rows.findIndex((r) => r.me) + 1;

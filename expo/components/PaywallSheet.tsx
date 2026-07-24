@@ -7,23 +7,23 @@ import colors from "@/constants/colors";
 import { fetchOfferings, isPurchasesConfigured, purchasePackageById, restorePurchases } from "@/lib/revenuecat";
 import { useGame } from "@/providers/GameProvider";
 
-type Tier = "yr" | "mo" | "wk";
+type Tier = "wk" | "weekly" | "mo";
 
 const TIER_PACKAGE: Record<Tier, string> = {
-  yr: "$rc_annual",
-  mo: "$rc_monthly",
   wk: "$rc_weekly",
+  weekly: "$rc_weekly_pro",
+  mo: "$rc_monthly",
 };
 
 const TIER_CTA: Record<Tier, string> = {
-  yr: "Unlock the year — $69.99",
-  mo: "Start 3-day free trial",
   wk: "Get the Weekend Pass — $6.99",
+  weekly: "Go Weekly — $9.99",
+  mo: "Start 3-day free trial",
 };
 const TIER_FINE: Record<Tier, string> = {
-  yr: "Cancel anytime in 2 taps. $5.83/month — cheaper than one bad river call.",
+  wk: "Full access for the weekend. No trial on the pass. Cancel anytime.",
+  weekly: "A full week of Pro. $9.99/week. Cancel anytime in 2 taps.",
   mo: "Free for 3 days, then $14.99/month. Cancel anytime in 2 taps.",
-  wk: "One week of full access, starts right now. No trial on the pass.",
 };
 
 const FEATURES: { icon: string; title: string; sub: string }[] = [
@@ -40,7 +40,7 @@ const FEATURES: { icon: string; title: string; sub: string }[] = [
  */
 export default function PaywallSheet() {
   const { paywallVisible, paywallMessage, closePaywall, refreshProStatus } = useGame();
-  const [tier, setTier] = useState<Tier>("yr");
+  const [tier, setTier] = useState<Tier>("mo");
   const [busy, setBusy] = useState<boolean>(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState<boolean>(false);
@@ -56,10 +56,10 @@ export default function PaywallSheet() {
 
   /** Localized price strings from the fetched packages, falling back to hardcoded USD. */
   const prices = useMemo(() => {
-    const fallback = { yr: "$69.99", mo: "$14.99", wk: "$6.99" };
+    const fallback = { wk: "$6.99", weekly: "$9.99", mo: "$14.99" };
     if (!current) return fallback;
     const out: Partial<Record<Tier, string>> = {};
-    (["yr", "mo", "wk"] as Tier[]).forEach((t) => {
+    (["wk", "weekly", "mo"] as Tier[]).forEach((t) => {
       const pkg = current.availablePackages.find((p) => p.identifier === TIER_PACKAGE[t]);
       if (pkg?.product?.priceString) out[t] = pkg.product.priceString;
     });
@@ -132,19 +132,6 @@ export default function PaywallSheet() {
           ))}
 
           <View style={styles.tiers}>
-            <Pressable style={[styles.tier, tier === "yr" && styles.tierOn]} onPress={() => setTier("yr")} testID="tier-yr">
-              <View style={[styles.badge, styles.badgeGold]}>
-                <Text style={styles.badgeGoldText}>BEST VALUE</Text>
-              </View>
-              <View style={styles.tierBody}>
-                <Text style={styles.tierName}>Annual Masterclass</Text>
-                <Text style={styles.tierSub}>The whole year, locked in</Text>
-              </View>
-              <View style={styles.tierPrice}>
-                <Text style={styles.tierP}>{prices.yr}</Text>
-                <Text style={styles.tierPer}>$5.83/mo</Text>
-              </View>
-            </Pressable>
             <Pressable style={[styles.tier, tier === "mo" && styles.tierOn]} onPress={() => setTier("mo")} testID="tier-mo">
               <View style={[styles.badge, styles.badgeGreen]}>
                 <Text style={styles.badgeGreenText}>3-DAY FREE TRIAL</Text>
@@ -158,14 +145,28 @@ export default function PaywallSheet() {
                 <Text style={styles.tierPer}>per month</Text>
               </View>
             </Pressable>
+            <Pressable style={[styles.tier, tier === "weekly" && styles.tierOn]} onPress={() => setTier("weekly")} testID="tier-weekly">
+              <View style={[styles.badge, styles.badgeGold]}>
+                <Text style={styles.badgeGoldText}>BEST VALUE</Text>
+              </View>
+              <View style={styles.tierBody}>
+                <Text style={styles.tierName}>Weekly Pro</Text>
+                <Text style={styles.tierSub}>A full week of unlimited access</Text>
+              </View>
+              <View style={styles.tierPrice}>
+                <Text style={styles.tierP}>{prices.weekly}</Text>
+                <Text style={styles.tierPer}>per week</Text>
+              </View>
+            </Pressable>
             <Pressable style={[styles.tier, tier === "wk" && styles.tierOn]} onPress={() => setTier("wk")} testID="tier-wk">
               <View style={styles.tierBody}>
                 <Text style={styles.tierName}>Weekend Pass</Text>
                 <Text style={styles.tierSub}>Just need it for this weekend&apos;s game?</Text>
               </View>
               <View style={styles.tierPrice}>
+                <Text style={styles.tierStrike}>$8.99</Text>
                 <Text style={styles.tierP}>{prices.wk}</Text>
-                <Text style={styles.tierPer}>per week</Text>
+                <Text style={styles.tierPer}>weekend deal</Text>
               </View>
             </Pressable>
           </View>
@@ -262,6 +263,13 @@ const styles = StyleSheet.create({
   tierName: { fontFamily: "Outfit_900Black", fontSize: 15, color: colors.cream },
   tierSub: { fontSize: 11.5, color: colors.muted, fontFamily: "Outfit_600SemiBold", marginTop: 1 },
   tierPrice: { alignItems: "flex-end" },
+  tierStrike: {
+    fontFamily: "Outfit_700Bold",
+    fontSize: 13,
+    color: colors.dim,
+    textDecorationLine: "line-through",
+    marginBottom: 2,
+  },
   tierP: { fontFamily: "Outfit_900Black", fontSize: 17, color: colors.cream },
   tierPer: { fontSize: 10.5, color: colors.dim, fontFamily: "Outfit_700Bold" },
   notice: {

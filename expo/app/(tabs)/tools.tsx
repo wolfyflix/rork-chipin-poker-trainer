@@ -10,6 +10,8 @@ import colors from "@/constants/colors";
 import { OUTS_REF } from "@/lib/curriculum";
 import { scanCards, ScanResult } from "@/lib/cardScanner";
 import { Card, cardKey, myOdds, OddsResult, OddsVerdict, oddsVerdict, whoWon, WhoWonResult } from "@/lib/poker";
+import { saveHandHistory } from "@/lib/handHistory";
+import { useAuth } from "@/providers/AuthProvider";
 import { useGame } from "@/providers/GameProvider";
 
 type ToolId = "hub" | "who" | "odds";
@@ -44,6 +46,7 @@ const COMMON_DRAWS: { name: string; outs: number; pct: number }[] = [
 export default function ToolsScreen() {
   const insets = useSafeAreaInsets();
   const { usesLeft, pro, chargeToolUse, openPaywall } = useGame();
+  const { user } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
 
   const [tool, setTool] = useState<ToolId>("hub");
@@ -136,7 +139,11 @@ export default function ToolsScreen() {
     }));
     const res = whoWon(ps, board);
     setWhoResult(res);
-  }, [whoBoard, players, chargeOrPaywall]);
+    // Save to cloud hand history
+    if (user?.id) {
+      saveHandHistory(user.id, res.evals, board, res.winners, res.hand, res.tie).catch(() => {});
+    }
+  }, [whoBoard, players, chargeOrPaywall, user]);
 
   const runOdds = useCallback(() => {
     if (!chargeOrPaywall()) return;

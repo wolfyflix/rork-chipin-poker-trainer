@@ -11,9 +11,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { useRouter } from "expo-router";
 
 import ChipDeltaPop from "@/components/ChipDeltaPop";
 import PaywallSheet from "@/components/PaywallSheet";
@@ -38,6 +40,7 @@ function RootLayoutNav() {
       <Stack.Screen name="cheats" options={{ presentation: "modal" }} />
       <Stack.Screen name="auth" options={{ presentation: "fullScreenModal", gestureEnabled: false, animation: "slide_from_bottom" }} />
       <Stack.Screen name="invite" options={{ presentation: "fullScreenModal", gestureEnabled: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="how-to-play" options={{ presentation: "fullScreenModal", gestureEnabled: false, animation: "slide_from_bottom" }} />
     </Stack>
   );
 }
@@ -45,6 +48,23 @@ function RootLayoutNav() {
 /** Shows a spinner while the auth session loads, then renders the app. */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem("@chipin_howto_seen");
+        if (!cancelled && !seen) {
+          router.push("/how-to-play");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loading, router]);
 
   if (loading) {
     return (

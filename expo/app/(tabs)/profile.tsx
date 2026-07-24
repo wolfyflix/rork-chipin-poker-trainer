@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
@@ -9,8 +9,11 @@ import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
 import { restorePurchases, isPurchasesConfigured } from "@/lib/revenuecat";
+import { enableStreakReminders, disableStreakReminders, isNotificationsEnabled, sendTestNotification } from "@/lib/notifications";
+import { loadHandHistory, type HandHistoryEntry } from "@/lib/handHistory";
 import { useAuth } from "@/providers/AuthProvider";
 import { useGame } from "@/providers/GameProvider";
+import { useQuery } from "@tanstack/react-query";
 
 const LIT_DAYS = new Set([9, 10, 12, 15, 16, 17, 22, 23, 24, 25]);
 const WEEK_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -23,8 +26,24 @@ export default function ProfileScreen() {
   const { chips, streak, completed, biggestPot, pro, usesLeft, lives, openPaywall, refreshProStatus, dailyXp, dailyGoalMet, dailyGoal, playerName, playerHandle, playerAvatar } = useGame();
   const [restoring, setResting] = useState<boolean>(false);
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
+  const [notifEnabled, setNotifEnabled] = useState<boolean>(false);
+  const [notifBusy, setNotifBusy] = useState<boolean>(false);
+  const [notifMsg, setNotifMsg] = useState<string | null>(null);
 
   const maxWeek = useMemo(() => Math.max(...CHIPS_WEEK, 1), []);
+
+  // Load notification setting on mount
+  React.useEffect(() => {
+    isNotificationsEnabled().then(setNotifEnabled);
+  }, []);
+
+  // Load hand history from cloud when authed
+  const { data: handHistory } = useQuery<HandHistoryEntry[]>({
+    queryKey: ["hand-history", user?.id],
+    queryFn: () => (user?.id ? loadHandHistory(user.id, 10) : Promise.resolve([])),
+    enabled: !!user?.id,
+    staleTime: 30_000,
+  });
 
   const handleRestore = useCallback(async () => {
     if (!isPurchasesConfigured()) {
@@ -60,6 +79,31 @@ export default function ProfileScreen() {
   const handleSignOut = useCallback(async () => {
     await signOut();
   }, [signOut]);
+
+  const toggleNotifications = useCallback(async () => {
+    setNotifBusy(true);
+    if (notifEnabled) {
+      await disableStreakReminders();
+      setNotifEnabled(false);
+      setNotifMsg("Streak reminders turned off.");
+    } else {
+      const ok = await enableStreakReminders();
+      if (ok) {
+        setNotifEnabled(true);
+        setNotifMsg("Streak reminders on! We'll ping you at 6 PM daily.");
+      } else {
+        setNotifMsg("Couldn't enable notifications — check your settings.");
+      }
+    }
+    setNotifBusy(false);
+    setTimeout(() => setNotifMsg(null), 3500);
+  }, [notifEnabled]);
+
+  const handleTestNotif = useCallback(async () => {
+    await sendTestNotification();
+    setNotifMsg("Test notification sent!");
+    setTimeout(() => setNotifMsg(null), 3000);
+  }, []);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -162,6 +206,49 @@ export default function ProfileScreen() {
           />
           {restoreMsg ? <Text style={styles.restoreMsg}>{restoreMsg}</Text> : null}
         </View>
+
+        {/* Notifications section */}
+        <View style={styles.subCard}>
+          <Text style={styles.sectionLabel}>Notifications</Text>
+          <View style={styles.notifRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.notifTitle}>🔥 Daily streak reminder</Text>
+              <Text style={styles.notifSub}>We'll ping you at 6 PM so you don't lose your streak.</Text>
+            </View>
+            <Switch
+              value={notifEnabled}
+              onValueChange={toggleNotifications}
+              disabled={notifBusy}
+              trackColor={{ false: colors.surface2, true: colors.mintDeep }}
+              thumbColor={notifEnabled ? colors.mint2 : colors.muted}
+              testID="notif-toggle"
+            />
+          </View>
+          {notifEnabled && (
+            <PressButton label="Send test notification" variant="ghost" onPress={handleTestNotif} small />
+          )}
+          {notifMsg ? <Text style={styles.restoreMsg}>{notifMsg}</Text> : null}
+        </View>
+
+        {/* Hand history section */}
+        {isAuthed && handHistory && handHistory.length > 0 && (
+          <View style={styles.subCard}>
+            <Text style={styles.sectionLabel}>Recent Hand History</Text>
+            {handHistory.slice(0, 5).map((h) => (
+              <View key={h.id} style={styles.handHistoryRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.handHistoryWinner}>
+                    {h.tie ? `Chop: ${h.winners.join(" + ")}` : `🏆 ${h.winners[0]}`}
+                  </Text>
+                  <Text style={styles.handHistoryHand}>{h.winning_hand}</Text>
+                </View>
+                <Text style={styles.handHistoryPlayers}>
+                  {h.players.length} players
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Account section */}
         <View style={styles.subCard}>
@@ -350,5 +437,47 @@ const styles = StyleSheet.create({
     color: colors.dim,
     marginTop: 6,
     marginBottom: 4,
+  },
+  notifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
+  notifTitle: {
+    fontSize: 14.5,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.cream,
+  },
+  notifSub: {
+    fontSize: 12,
+    color: colors.muted,
+    fontFamily: "Outfit_600SemiBold",
+    marginTop: 2,
+    lineHeight: 17,
+  },
+  handHistoryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  handHistoryWinner: {
+    fontSize: 14,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.cream,
+  },
+  handHistoryHand: {
+    fontSize: 12,
+    color: colors.muted,
+    fontFamily: "Outfit_600SemiBold",
+    marginTop: 2,
+  },
+  handHistoryPlayers: {
+    fontSize: 11,
+    fontFamily: "Outfit_700Bold",
+    color: colors.dim,
   },
 });

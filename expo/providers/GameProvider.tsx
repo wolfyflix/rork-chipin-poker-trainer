@@ -135,6 +135,9 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [presenceList, setPresenceList] = useState<{ id: string; name: string; avatar: string }[]>([]);
 
+  // Daily challenge — one scenario per day, tracked across sessions.
+  const [dailyChallengeDone, setDailyChallengeDone] = useState<string[]>([]);
+
   // Lives — start full, refill on a timer.
   const [lives, setLives] = useState<number>(MAX_LIVES);
   const [nextLifeAt, setNextLifeAt] = useState<number | null>(null);
@@ -157,6 +160,7 @@ export const [GameProvider, useGame] = createContextHook(() => {
       setPlayerName("Player");
       setPlayerHandle("player");
       setPlayerAvatar("🦈");
+      setDailyChallengeDone([]);
       return;
     }
 
@@ -278,7 +282,7 @@ export const [GameProvider, useGame] = createContextHook(() => {
     };
   }, []);
 
-  /** Load persisted daily goal state on mount. Resets if the date bucket rolled over. */
+  /** Load persisted daily goal state and daily challenge completion on mount. Resets if the date bucket rolled over. */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -300,6 +304,16 @@ export const [GameProvider, useGame] = createContextHook(() => {
       } catch {
         /* ignore */
       }
+
+      // Load daily challenge completion dates
+      try {
+        const rawDates = await AsyncStorage.getItem("@chipin_daily_challenge");
+        if (cancelled || !rawDates) return;
+        const dates = JSON.parse(rawDates) as string[];
+        setDailyChallengeDone(dates);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       cancelled = true;
@@ -315,6 +329,16 @@ export const [GameProvider, useGame] = createContextHook(() => {
       /* ignore */
     });
   }, [dailyDate, dailyXp, dailyGoalMet]);
+
+  /** Persist daily challenge completion dates. */
+  useEffect(() => {
+    AsyncStorage.setItem(
+      "@chipin_daily_challenge",
+      JSON.stringify(dailyChallengeDone),
+    ).catch(() => {
+      /* ignore */
+    });
+  }, [dailyChallengeDone]);
 
   /** Re-check entitlement after a purchase completes (called from PaywallSheet). */
   const refreshProStatus = useCallback(async () => {
@@ -440,6 +464,15 @@ export const [GameProvider, useGame] = createContextHook(() => {
 
   const toggleHardMode = useCallback(() => {
     setHardMode((h) => !h);
+  }, []);
+
+  /** Mark today's daily challenge as done. Idempotent — won't add the same date twice. */
+  const completeDailyChallenge = useCallback((): void => {
+    const today = todayKey();
+    setDailyChallengeDone((prev) => {
+      if (prev.includes(today)) return prev;
+      return [...prev, today];
+    });
   }, []);
 
   /** Add a friend by username — searches Supabase profiles and sends a friend request. */
@@ -607,6 +640,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
       dailyXp,
       dailyGoalMet,
       dailyGoal: DAILY_GOAL_XP,
+      dailyChallengeDone,
+      completeDailyChallenge,
       friends,
       pendingInvites,
       tableConfig,
@@ -647,6 +682,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, sessionId, activeSession, presenceList, hostSession, joinSession, subscribeSession, trackPresenceSession, broadcastState, leaveSession, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, dailyChallengeDone, friends, pendingInvites, tableConfig, invitedToTable, sessionId, activeSession, presenceList, hostSession, joinSession, subscribeSession, trackPresenceSession, broadcastState, leaveSession, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus, completeDailyChallenge],
   );
 });

@@ -11,6 +11,7 @@ import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
 import { CURRICULUM, Lesson, Unit } from "@/lib/curriculum";
 import { MAX_LIVES, STREAK_RECOVERY_COST, TABLE_UNLOCK_LESSONS, useGame } from "@/providers/GameProvider";
+import { getTodayChallenge, getChallengeStreak, isChallengeDone, type DailyChallenge } from "@/lib/dailyChallenge";
 
 function PulsingNode({ children }: { children: React.ReactNode }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -31,13 +32,19 @@ function LivesHeart({ filled }: { filled: boolean }) {
 }
 
 export default function LearnScreen() {
-  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak, playerName, isAuthed } = useGame();
+  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak, playerName, isAuthed, dailyChallengeDone, completeDailyChallenge, payChips, awardXp } = useGame();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [notice, setNotice] = useState<string | null>(null);
   const [tablePrompt, setTablePrompt] = useState<boolean>(false);
   const [recoverOpen, setRecoverOpen] = useState<boolean>(false);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const todayChallenge = useMemo(() => getTodayChallenge(), []);
+  const challengeDone = isChallengeDone(dailyChallengeDone);
+  const challengeStreak = useMemo(() => getChallengeStreak(dailyChallengeDone), [dailyChallengeDone]);
+  const [challengePicked, setChallengePicked] = useState<number | null>(null);
+  const [challengeLocked, setChallengeLocked] = useState<boolean>(false);
 
   const showNotice = useCallback((msg: string) => {
     setNotice(msg);
@@ -54,6 +61,21 @@ export default function LearnScreen() {
       showNotice(`Need ${STREAK_RECOVERY_COST} chips to restore your streak`);
     }
   }, [restoreStreak, showNotice]);
+
+  const pickChallenge = useCallback((choice: number) => {
+    if (challengeLocked || challengeDone) return;
+    setChallengeLocked(true);
+    setChallengePicked(choice);
+    const correct = choice === todayChallenge.correct;
+    if (correct) {
+      payChips(100);
+      awardXp(20);
+      completeDailyChallenge();
+      showNotice("✅ Correct! +100 chips +20 XP");
+    } else {
+      showNotice("❌ Not quite — see the explanation below");
+    }
+  }, [challengeLocked, challengeDone, todayChallenge, payChips, awardXp, completeDailyChallenge, showNotice]);
 
   const tapNode = useCallback(
     (unit: Unit, lesson: Lesson, index: number) => {
@@ -160,6 +182,82 @@ export default function LearnScreen() {
           <View style={styles.heroBadge}>
             <Text style={styles.heroBadgeText}>3-HANDED · NO LIMIT</Text>
           </View>
+        </View>
+
+        {/* Daily Challenge card */}
+        <View style={styles.dailyCard}>
+          <View style={styles.dailyHeader}>
+            <View style={styles.dailyBadge}>
+              <Text style={styles.dailyBadgeText}>DAILY CHALLENGE</Text>
+            </View>
+            {challengeStreak > 0 && (
+              <Text style={styles.dailyStreak}>🔥 {challengeStreak} day{challengeStreak !== 1 ? "s" : ""}</Text>
+            )}
+          </View>
+          <Text style={styles.dailyPrompt}>
+            You have {todayChallenge.heroName}. The pot is {todayChallenge.pot} and your opponent bets {todayChallenge.oppBet}. What do you do?
+          </Text>
+          <View style={styles.dailyCardsRow}>
+            <View style={styles.dailyCardGroup}>
+              <Text style={styles.dailyCardLabel}>YOUR HAND</Text>
+              <View style={styles.dailyCardHand}>
+                {todayChallenge.hero.map((c, i) => (
+                  <PlayingCard key={i} card={c} size="mini" />
+                ))}
+              </View>
+            </View>
+            <View style={styles.dailyCardGroup}>
+              <Text style={styles.dailyCardLabel}>THE BOARD</Text>
+              <View style={styles.dailyCardHand}>
+                {todayChallenge.board.map((c, i) => (
+                  <PlayingCard key={i} card={c} size="mini" />
+                ))}
+              </View>
+            </View>
+          </View>
+          {challengeDone ? (
+            <View style={styles.dailyDoneBox}>
+              <Text style={styles.dailyDoneEmoji}>✅</Text>
+              <Text style={styles.dailyDoneText}>Challenge complete! Come back tomorrow.</Text>
+            </View>
+          ) : challengePicked != null ? (
+            <View style={styles.dailyResultBox}>
+              <Text style={[
+                styles.dailyResultTitle,
+                challengePicked === todayChallenge.correct ? { color: colors.good } : { color: colors.red },
+              ]}>
+                {challengePicked === todayChallenge.correct ? "Correct! +100 chips" : "Not quite"}
+              </Text>
+              <Text style={styles.dailyResultText}>{todayChallenge.explanation}</Text>
+            </View>
+          ) : (
+            <View style={styles.dailyOptionsRow}>
+              {todayChallenge.options.map((opt) => {
+                const isCorrect = challengePicked != null && opt.value === todayChallenge.correct;
+                const isWrong = challengePicked === opt.value && opt.value !== todayChallenge.correct;
+                return (
+                  <Pressable
+                    key={opt.value}
+                    onPress={() => pickChallenge(opt.value)}
+                    style={[
+                      styles.dailyOption,
+                      isCorrect && styles.dailyOptionRight,
+                      isWrong && styles.dailyOptionWrong,
+                    ]}
+                    disabled={challengeLocked}
+                  >
+                    <Text style={[
+                      styles.dailyOptionText,
+                      isCorrect && { color: colors.good },
+                      isWrong && { color: colors.red },
+                    ]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         {map.map(({ unit, unlocked, nodes }) => (
@@ -573,5 +671,124 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: "center",
     marginBottom: 18,
+  },
+  dailyCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 18,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: "rgba(233,196,100,0.3)",
+  },
+  dailyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  dailyBadge: {
+    backgroundColor: colors.gold,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+  },
+  dailyBadgeText: {
+    fontSize: 9.5,
+    fontFamily: "Outfit_900Black",
+    color: "#3B2A05",
+    letterSpacing: 1,
+  },
+  dailyStreak: {
+    fontSize: 12,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.gold2,
+  },
+  dailyPrompt: {
+    fontSize: 14,
+    fontFamily: "Outfit_600SemiBold",
+    color: colors.cream,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  dailyCardsRow: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 16,
+  },
+  dailyCardGroup: {
+    flex: 1,
+    alignItems: "center",
+  },
+  dailyCardLabel: {
+    fontSize: 9.5,
+    fontFamily: "Outfit_800ExtraBold",
+    letterSpacing: 1.2,
+    color: colors.dim,
+    marginBottom: 6,
+  },
+  dailyCardHand: {
+    flexDirection: "row",
+    gap: 4,
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  dailyOptionsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  dailyOption: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    backgroundColor: colors.surface2,
+    borderWidth: 2,
+    borderColor: colors.line,
+  },
+  dailyOptionRight: {
+    borderColor: colors.good,
+    backgroundColor: "rgba(67,209,124,0.12)",
+  },
+  dailyOptionWrong: {
+    borderColor: colors.red,
+    backgroundColor: "rgba(228,87,61,0.12)",
+  },
+  dailyOptionText: {
+    fontFamily: "Outfit_900Black",
+    fontSize: 14,
+    color: colors.cream,
+  },
+  dailyDoneBox: {
+    alignItems: "center",
+    paddingVertical: 16,
+    backgroundColor: "rgba(67,209,124,0.08)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(67,209,124,0.3)",
+  },
+  dailyDoneEmoji: { fontSize: 28, marginBottom: 6 },
+  dailyDoneText: {
+    fontSize: 13,
+    fontFamily: "Outfit_700Bold",
+    color: colors.good,
+  },
+  dailyResultBox: {
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  dailyResultTitle: {
+    fontSize: 15,
+    fontFamily: "Outfit_900Black",
+    marginBottom: 6,
+  },
+  dailyResultText: {
+    fontSize: 13,
+    fontFamily: "Outfit_600SemiBold",
+    color: colors.muted,
+    lineHeight: 19,
   },
 });
