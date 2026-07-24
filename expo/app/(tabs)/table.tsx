@@ -4,6 +4,7 @@ import {
   Dimensions,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -27,6 +28,13 @@ import {
   whoWon,
 } from "@/lib/poker";
 import { Friend, TableConfig, useGame } from "@/providers/GameProvider";
+import { useAuth } from "@/providers/AuthProvider";
+import {
+  subscribeToSession,
+  trackPresence,
+  type GameSession,
+  type SessionPlayer,
+} from "@/lib/gameSession";
 
 /**
  * The Table — Texas Hold'em poker room.
@@ -194,6 +202,7 @@ const AI_EMOJIS = ["\u{1F9E2}", "\u{1F33A}", "\u{1F3A7}", "\u{1F3C8}", "\u{1F3AF
 export default function TableScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const {
     chips,
     payChips,
@@ -205,6 +214,18 @@ export default function TableScreen() {
     clearTableGame,
     tableConfig,
     addFriend,
+    playerName,
+    playerAvatar,
+    hostSession,
+    sessionId,
+    activeSession,
+    setActiveSession,
+    presenceList,
+    setPresenceList,
+    subscribeSession,
+    trackPresenceSession,
+    broadcastState,
+    leaveSession,
   } = useGame();
 
   // ---- Lobby state ----
@@ -257,8 +278,24 @@ export default function TableScreen() {
     setTimeout(() => setChipFlies((prev) => prev.filter((c) => c.id !== id)), 650);
   }, []);
 
+  // ---- Real-time subscriptions ----
+  // Subscribe to session updates + presence when a session ID is set.
+  useEffect(() => {
+    if (!sessionId) return;
+    const unsubSession = subscribeSession(sessionId, (s) => {
+      setActiveSession(s);
+    });
+    const unsubPresence = trackPresenceSession(sessionId, (present) => {
+      setPresenceList(present);
+    });
+    return () => {
+      unsubSession();
+      unsubPresence();
+    };
+  }, [sessionId, subscribeSession, trackPresenceSession, setActiveSession, setPresenceList]);
+
   // ---- Lobby: create the game ----
-  const createGame = useCallback(() => {
+  const createGame = useCallback(async () => {
     if (chips < selectedBuyIn) return;
 
     const invitedIds = Array.from(invitedToTable);
@@ -347,7 +384,15 @@ export default function TableScreen() {
     setBiggestPot(0);
     setDealerIdx(0);
     addLog(`Game started! ${selectedPlayerCount} players, buy-in ${selectedBuyIn}, blinds ${sb}/${bb}.`, "neutral");
-  }, [chips, selectedBuyIn, selectedPlayerCount, friends, invitedToTable, sb, bb, payChips, startTableGame, addLog]);
+
+    // Create a Supabase game session if the user is authed (enables real-time multiplayer)
+    if (user?.id && friendCount > 0) {
+      const res = await hostSession(config);
+      if ("id" in res) {
+        addLog(`Table created — share your invite link so friends can join live!`, "good");
+      }
+    }
+  }, [chips, selectedBuyIn, selectedPlayerCount, friends, invitedToTable, sb, bb, payChips, startTableGame, addLog, user?.id, hostSession]);
 
   const newHand = useCallback(() => {
     if (players.length === 0) return;
@@ -738,14 +783,15 @@ export default function TableScreen() {
     return () => clearTimeout(t);
   }, [street, players, newHand]);
 
-  const leaveTable = useCallback(() => {
+  const leaveTable = useCallback(async () => {
     const heroStack = hero?.stack ?? 0;
     const cashout = heroStack - selectedBuyIn;
     if (heroStack > 0) payChips(heroStack, true);
     addLog(`Left the table. ${heroStack > 0 ? `Cashed out ${heroStack} (${cashout >= 0 ? "+" : ""}${cashout}).` : "Felted."}`, heroStack > selectedBuyIn ? "good" : "bad");
     clearTableGame();
+    if (sessionId) await leaveSession();
     router.back();
-  }, [hero, payChips, addLog, router, selectedBuyIn, clearTableGame]);
+  }, [hero, payChips, addLog, router, selectedBuyIn, clearTableGame, sessionId, leaveSession]);
 
   const liveOppCount = players.filter((p) => !p.isHero && !p.folded).length;
   const heroEval = useMemo(() => (hero && hero.hole.length === 2 && board.length >= 3 ? evaluate([...hero.hole, ...board]) : null), [hero, board]);
@@ -759,6 +805,20 @@ export default function TableScreen() {
     setFriendHandle("");
     setAddFriendSheet(false);
   }, [friendHandle, addFriend]);
+
+  /** Share the table invite link so friends can join the live game. */
+  const shareTableLink = useCallback(async () => {
+    if (!user?.id) return;
+    const link = `rork-app://invite?ref=${user.id}`;
+    try {
+      await Share.share({
+        message: `Join me at the poker table on ChipIn! ${link}`,
+        title: "ChipIn — Join my poker game",
+      });
+    } catch {
+      /* user cancelled share sheet */
+    }
+  }, [user?.id]);
 
   // ============ LOBBY SCREEN ============
   if (lobbyOpen) {
@@ -889,6 +949,13 @@ export default function TableScreen() {
               <Text style={styles.bankrollWarn}>Need {selectedBuyIn} chips to sit down. Hit the Arena to earn some.</Text>
             )}
           </View>
+
+          {/* Share table link (if authed) */}
+          {user?.id && (
+            <Pressable style={styles.shareLinkBtn} onPress={shareTableLink}>
+              <Text style={styles.shareLinkText}>Share table invite link</Text>
+            </Pressable>
+          )}
 
           {/* Start button */}
           <View style={styles.lobbyCtaWrap}>
@@ -1435,6 +1502,19 @@ const styles = StyleSheet.create({
 
   lobbyCtaWrap: { marginHorizontal: 16, marginBottom: 20 },
   lobbyCta: { alignSelf: "stretch" },
+
+  shareLinkBtn: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingVertical: 13,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.mintDeep,
+    backgroundColor: "rgba(198,238,199,0.06)",
+    alignItems: "center",
+  },
+  shareLinkText: { color: colors.mint, fontFamily: "Outfit_800ExtraBold", fontSize: 13 },
 
   // ---- Sheets ----
   promptWrap: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0, justifyContent: "flex-end", zIndex: 80 },

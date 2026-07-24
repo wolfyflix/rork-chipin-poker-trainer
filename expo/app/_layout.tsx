@@ -37,6 +37,7 @@ function RootLayoutNav() {
       <Stack.Screen name="lesson" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
       <Stack.Screen name="cheats" options={{ presentation: "modal" }} />
       <Stack.Screen name="auth" options={{ presentation: "fullScreenModal", gestureEnabled: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="invite" options={{ presentation: "fullScreenModal", gestureEnabled: false, animation: "slide_from_bottom" }} />
     </Stack>
   );
 }

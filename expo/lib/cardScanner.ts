@@ -13,11 +13,11 @@ const TOOLKIT_URL = process.env.EXPO_PUBLIC_TOOLKIT_URL;
 const SECRET_KEY = process.env.EXPO_PUBLIC_RORK_TOOLKIT_SECRET_KEY;
 
 /**
- * Google Gemini 3.5 Flash — excellent vision/OCR capabilities,
- * very affordable ($1.5/M input tokens). Much more accurate than
- * free flash-tier models for reading small text/symbols on cards.
+ * Google Gemini 3.6 Flash — newest flash model (released 07/2026),
+ * excellent vision/OCR, $1.50/M input tokens. Best price/quality
+ * for reading small rank/suit symbols on playing cards.
  */
-const MODEL_ID = "google/gemini-3.5-flash";
+const MODEL_ID = "google/gemini-3.6-flash";
 
 const RANK_MAP: Record<string, number> = {
   "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
@@ -173,7 +173,7 @@ export async function scanCards(imageUri: string): Promise<ScanResult> {
     throw new Error("AI scanner not configured — missing toolkit credentials.");
   }
 
-  const { base64 } = await resizeForUpload(imageUri, 4_000_000);
+  const { base64 } = await resizeForUpload(imageUri);
 
   const prompt = `You are an expert at reading playing cards from photos. You are looking at a photo of a poker table.
 
@@ -222,6 +222,8 @@ Rules:
     ],
     max_tokens: 800,
     temperature: 0.1,
+    // Gemini 3.6 supports reasoning — set to minimal for fast, direct output
+    reasoning: "minimal",
   };
 
   const response = await fetch(`${TOOLKIT_URL}/v2/vercel/v1/chat/completions`, {
@@ -235,11 +237,29 @@ Rules:
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
-    throw new Error(`Scan failed (${response.status}): ${errText.slice(0, 200)}`);
+    const status = response.status;
+    let userMsg = "Scan failed";
+    if (status === 413 || errText.includes("PAYLOAD_TOO_LARGE")) {
+      userMsg = "Photo too large for the AI — try a closer, lower-res shot.";
+    } else if (status === 429) {
+      userMsg = "Rate limited — wait a few seconds and try again.";
+    } else if (status === 404) {
+      userMsg = "AI model unavailable — entering cards manually instead.";
+    } else if (status >= 500) {
+      userMsg = "AI service temporarily down — try again or enter cards manually.";
+    }
+    throw new Error(`${userMsg} (HTTP ${status}): ${errText.slice(0, 150)}`);
   }
 
   const data = await response.json();
-  const text: string = data?.choices?.[0]?.message?.content ?? "";
+  // Handle both string content and array content (some providers return arrays)
+  const rawContent = data?.choices?.[0]?.message?.content;
+  const text: string =
+    typeof rawContent === "string"
+      ? rawContent
+      : Array.isArray(rawContent)
+        ? rawContent.map((c: { text?: string }) => c?.text ?? "").join("")
+        : "";
 
   if (!text) {
     throw new Error("AI returned no response — try again or enter cards manually.");

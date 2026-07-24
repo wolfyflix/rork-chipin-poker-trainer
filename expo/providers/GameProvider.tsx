@@ -5,6 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchCustomerInfo, hasProEntitlement, isPurchasesConfigured } from "@/lib/revenuecat";
 import {
+  createGameSession as createSessionDb,
+  joinGameSession as joinSessionDb,
+  subscribeToSession as subscribeSessionDb,
+  trackPresence as trackPresenceDb,
+  leaveGameSession as leaveSessionDb,
+  updateGameState as updateGameStateDb,
+  type GameSession,
+  type SessionPlayer,
+} from "@/lib/gameSession";
+import {
   loadFriends as loadFriendsDb,
   findUserByHandle,
   sendRequest as sendRequestDb,
@@ -119,6 +129,11 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [pendingInvites, setPendingInvites] = useState<string[]>([]);
   const [tableConfig, setTableConfig] = useState<TableConfig | null>(null);
   const [invitedToTable, setInvitedToTable] = useState<Set<string>>(new Set());
+
+  // Multiplayer session state — real-time poker via Supabase Realtime.
+  const [activeSession, setActiveSession] = useState<GameSession | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [presenceList, setPresenceList] = useState<{ id: string; name: string; avatar: string }[]>([]);
 
   // Lives — start full, refill on a timer.
   const [lives, setLives] = useState<number>(MAX_LIVES);
@@ -508,6 +523,57 @@ export const [GameProvider, useGame] = createContextHook(() => {
     });
   }, []);
 
+  /** Create a multiplayer game session in Supabase (host only). */
+  const hostSession = useCallback(async (config: TableConfig): Promise<{ id: string } | { error: string }> => {
+    if (!userId) return { error: "Sign in to host a game." };
+    const sessionConfig = {
+      maxPlayers: config.maxPlayers,
+      buyIn: config.buyIn,
+      smallBlind: config.smallBlind,
+      bigBlind: config.bigBlind,
+      startStack: config.buyIn * 5,
+    };
+    const res = await createSessionDb(userId, playerName, playerAvatar, sessionConfig);
+    if ("error" in res) return { error: res.error };
+    setSessionId(res.id);
+    return { id: res.id };
+  }, [userId, playerName, playerAvatar]);
+
+  /** Join a multiplayer game session by ID. */
+  const joinSession = useCallback(async (sid: string): Promise<{ ok: boolean; error: string | null }> => {
+    if (!userId) return { ok: false, error: "Sign in to join a game." };
+    const startStack = tableConfig ? tableConfig.buyIn * 5 : 1000;
+    const res = await joinSessionDb(sid, userId, playerName, playerAvatar, startStack);
+    if (res.error) return { ok: false, error: res.error };
+    setSessionId(sid);
+    return { ok: true, error: null };
+  }, [userId, playerName, playerAvatar, tableConfig]);
+
+  /** Subscribe to real-time updates on the active session. Returns unsubscribe fn. */
+  const subscribeSession = useCallback((sid: string, onUpdate: (s: GameSession) => void): (() => void) => {
+    return subscribeSessionDb(sid, onUpdate);
+  }, []);
+
+  /** Track presence on the session channel. Returns unsubscribe fn. */
+  const trackPresenceSession = useCallback((sid: string, onUpdate: (p: { id: string; name: string; avatar: string }[]) => void): (() => void) => {
+    if (!userId) return () => {};
+    return trackPresenceDb(sid, userId, playerName, playerAvatar, onUpdate);
+  }, [userId, playerName, playerAvatar]);
+
+  /** Broadcast updated game state to all subscribers (host only). */
+  const broadcastState = useCallback(async (patch: Partial<GameSession>): Promise<void> => {
+    if (!sessionId) return;
+    await updateGameStateDb(sessionId, patch);
+  }, [sessionId]);
+
+  /** Leave the active session and clean up. */
+  const leaveSession = useCallback(async (): Promise<void> => {
+    if (!sessionId || !userId) return;
+    await leaveSessionDb(sessionId, userId);
+    setSessionId(null);
+    setActiveSession(null);
+  }, [sessionId, userId]);
+
   /** The Table unlocks after N completed lessons. */
   const tableUnlocked = completed.size >= TABLE_UNLOCK_LESSONS;
 
@@ -553,6 +619,17 @@ export const [GameProvider, useGame] = createContextHook(() => {
       startTableGame,
       clearTableGame,
       toggleInviteFriend,
+      sessionId,
+      activeSession,
+      setActiveSession,
+      presenceList,
+      setPresenceList,
+      hostSession,
+      joinSession,
+      subscribeSession,
+      trackPresenceSession,
+      broadcastState,
+      leaveSession,
       payChips,
       completeLesson,
       awardXp,
@@ -570,6 +647,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, friends, pendingInvites, tableConfig, invitedToTable, sessionId, activeSession, presenceList, hostSession, joinSession, subscribeSession, trackPresenceSession, broadcastState, leaveSession, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus],
   );
 });

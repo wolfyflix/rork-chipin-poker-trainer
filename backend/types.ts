@@ -163,41 +163,68 @@ export type Database = {
       }
       profiles: {
         Row: {
+          arena_highs: Json
           avatar: string
           biggest_pot: number
           chips: number
           completed_lessons: string[]
+          daily_date: string | null
+          daily_goal_met: boolean
+          daily_xp: number
+          handle: string | null
           highs: Json
           id: string
+          is_pro: boolean
           last_played: string | null
+          name: string | null
           squad_id: string | null
           streak: number
+          streak_broken: boolean
+          streak_recovered_today: boolean
           updated_at: string
           username: string
         }
         Insert: {
+          arena_highs?: Json
           avatar?: string
           biggest_pot?: number
           chips?: number
           completed_lessons?: string[]
+          daily_date?: string | null
+          daily_goal_met?: boolean
+          daily_xp?: number
+          handle?: string | null
           highs?: Json
           id: string
+          is_pro?: boolean
           last_played?: string | null
+          name?: string | null
           squad_id?: string | null
           streak?: number
+          streak_broken?: boolean
+          streak_recovered_today?: boolean
           updated_at?: string
           username: string
         }
         Update: {
+          arena_highs?: Json
           avatar?: string
           biggest_pot?: number
           chips?: number
           completed_lessons?: string[]
+          daily_date?: string | null
+          daily_goal_met?: boolean
+          daily_xp?: number
+          handle?: string | null
           highs?: Json
           id?: string
+          is_pro?: boolean
           last_played?: string | null
+          name?: string | null
           squad_id?: string | null
           streak?: number
+          streak_broken?: boolean
+          streak_recovered_today?: boolean
           updated_at?: string
           username?: string
         }
