@@ -1,5 +1,8 @@
-// @ts-nocheck
-import * as ImageManipulator from "expo-image-manipulator";
+import {
+  ImageManipulator,
+  ImageRef,
+  SaveFormat,
+} from "expo-image-manipulator";
 
 /**
  * 3 MB decoded budget — base64 adds ~33% overhead, so 3 MB decoded
@@ -11,13 +14,12 @@ const DEFAULT_MAX_BYTES = 3_000_000;
 /**
  * Resolution ladder for card recognition. Starts at 1280px (enough
  * detail for card corners) and steps down if the byte budget isn't met.
- * Per the image-input-requirements guide.
  */
 const LADDER = [
   { width: 1280, compress: 0.82 },
   { width: 1024, compress: 0.78 },
   { width: 832, compress: 0.74 },
-  { width: 640, compress: 0.70 },
+  { width: 640, compress: 0.7 },
   { width: 512, compress: 0.65 },
 ] as const;
 
@@ -34,7 +36,7 @@ const stripDataUriPrefix = (b64: string): string => {
 const base64ByteLength = (b64: string): number => {
   const len = b64.length;
   const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
-  return Math.floor(len * 3) / 4 - padding;
+  return Math.floor((len * 3) / 4) - padding;
 };
 
 /**
@@ -50,9 +52,9 @@ export async function resizeForUpload(
     const context = ImageManipulator.manipulate(imageUri);
     context.resize({ width: step.width });
 
-    const rendered = await context.renderAsync();
+    const rendered: ImageRef = await context.renderAsync();
     const saved = await rendered.saveAsync({
-      format: ImageManipulator.SaveFormat.JPEG,
+      format: SaveFormat.JPEG,
       compress: step.compress,
       base64: true,
     });
@@ -65,5 +67,20 @@ export async function resizeForUpload(
     }
   }
 
-  throw new Error("IMAGE_TOO_LARGE");
+  // Even the smallest ladder step didn't fit — take the lowest rung anyway.
+  const context = ImageManipulator.manipulate(imageUri);
+  context.resize({ width: 512 });
+  const rendered: ImageRef = await context.renderAsync();
+  const saved = await rendered.saveAsync({
+    format: SaveFormat.JPEG,
+    compress: 0.6,
+    base64: true,
+  });
+  if (!saved.base64) {
+    throw new Error("IMAGE_TOO_LARGE");
+  }
+  return {
+    base64: stripDataUriPrefix(saved.base64),
+    mimeType: "image/jpeg",
+  };
 }

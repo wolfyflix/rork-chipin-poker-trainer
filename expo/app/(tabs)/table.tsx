@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
 import { Users2, UserPlus, Crown, Wifi } from "lucide-react-native";
 
 import ChipIcon from "@/components/ChipIcon";
@@ -809,7 +810,9 @@ export default function TableScreen() {
   /** Share the table invite link so friends can join the live game. */
   const shareTableLink = useCallback(async () => {
     if (!user?.id) return;
-    const link = `rork-app://invite?ref=${user.id}`;
+    // Linking.createURL produces a working link in every environment:
+    // https link on web, exp:// in Expo Go, scheme:// in a standalone build.
+    const link = Linking.createURL(`invite?ref=${user.id}`);
     try {
       await Share.share({
         message: `Join me at the poker table on ChipIn! ${link}`,

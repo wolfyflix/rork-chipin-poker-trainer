@@ -189,40 +189,57 @@ export default function ToolsScreen() {
     setScanning(true);
     setScanPreview(null);
     try {
+      // Make sure we actually have camera access — a denied permission is the
+      // #1 reason the camera "silently does nothing".
+      const existing = await ImagePicker.getCameraPermissionsAsync();
+      if (!existing.granted) {
+        const req = await ImagePicker.requestCameraPermissionsAsync();
+        if (!req.granted) {
+          showNotice("Camera access is off. Enable it in Settings › ChipIn › Camera.");
+          return;
+        }
+      }
       const res = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+        mediaTypes: ["images"],
+        quality: 0.85,
       });
       if (res.canceled || !res.assets?.length) {
-        setScanning(false);
         return;
       }
       const uri = res.assets[0].uri;
       const result = await scanCards(uri);
       setScanPreview(result);
 
+      // Dedupe: if the AI read the same physical card twice, keep only the first
+      const seen = new Set<number>();
+      const dedupe = (cards: Card[]): (Card | null)[] =>
+        cards.map((c) => {
+          const k = cardKey(c);
+          if (seen.has(k)) return null;
+          seen.add(k);
+          return c;
+        });
+
       if (target === "who") {
         // Prefill Who Won? — board + hero + one opponent
-        const filledBoard = result.board.filter(Boolean) as Card[];
+        const filledBoard = dedupe(result.board.filter(Boolean) as Card[]);
         if (filledBoard.length > 0) {
           setWhoBoard([...filledBoard, ...Array(5 - filledBoard.length).fill(null)]);
         }
-        const heroCards = result.hero.filter(Boolean) as Card[];
-        const oppCards = result.opponent.filter(Boolean) as Card[];
+        const heroCards = dedupe(result.hero.filter(Boolean) as Card[]);
+        const oppCards = dedupe(result.opponent.filter(Boolean) as Card[]);
         setPlayers([
-          { name: "Me", hole: heroCards.length === 2 ? heroCards : [heroCards[0] ?? null, heroCards[1] ?? null] },
-          { name: "Opponent", hole: oppCards.length === 2 ? oppCards : [oppCards[0] ?? null, oppCards[1] ?? null] },
+          { name: "Me", hole: [heroCards[0] ?? null, heroCards[1] ?? null] },
+          { name: "Opponent", hole: [oppCards[0] ?? null, oppCards[1] ?? null] },
         ]);
         setWhoResult(null);
       } else {
         // Prefill My Odds — hero + board only (opponent count is set via stepper)
-        const heroCards = result.hero.filter(Boolean) as Card[];
+        const heroCards = dedupe(result.hero.filter(Boolean) as Card[]);
         if (heroCards.length > 0) {
           setOddsHero([heroCards[0] ?? null, heroCards[1] ?? null]);
         }
-        const filledBoard = result.board.filter(Boolean) as Card[];
+        const filledBoard = dedupe(result.board.filter(Boolean) as Card[]);
         if (filledBoard.length > 0) {
           setOddsBoard([...filledBoard, ...Array(5 - filledBoard.length).fill(null)]);
         }
@@ -231,7 +248,7 @@ export default function ToolsScreen() {
 
       const total = result.board.filter(Boolean).length + result.hero.filter(Boolean).length + result.opponent.filter(Boolean).length;
       if (total === 0) {
-        showNotice("Couldn't read any cards from the photo. Tap the slots to enter them manually.");
+        showNotice("Couldn't read any cards. Get closer, make sure faces are up, and try again.");
       } else if (result.confidence === "low") {
         showNotice(`📸 Read ${total} card${total > 1 ? "s" : ""} — some may be wrong. Tap any slot to fix.`);
       } else if (result.confidence === "partial") {

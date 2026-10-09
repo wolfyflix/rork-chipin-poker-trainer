@@ -35,7 +35,19 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "ChipIn uses your camera to scan poker tables and read the cards."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#43D17C"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
