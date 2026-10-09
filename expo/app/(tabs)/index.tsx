@@ -10,6 +10,7 @@ import PressButton from "@/components/PressButton";
 import TopBar from "@/components/TopBar";
 import colors from "@/constants/colors";
 import { CURRICULUM, Lesson, Unit } from "@/lib/curriculum";
+import { SKILL_TIERS } from "@/lib/skillAssessment";
 import { MAX_LIVES, STREAK_RECOVERY_COST, TABLE_UNLOCK_LESSONS, useGame } from "@/providers/GameProvider";
 import { getTodayChallenge, getChallengeStreak, isChallengeDone, type DailyChallenge } from "@/lib/dailyChallenge";
 
@@ -32,7 +33,7 @@ function LivesHeart({ filled }: { filled: boolean }) {
 }
 
 export default function LearnScreen() {
-  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak, playerName, isAuthed, dailyChallengeDone, completeDailyChallenge, payChips, awardXp } = useGame();
+  const { chips, completed, pro, openPaywall, dailyClaimed, claimDailyDrop, lives, tableUnlocked, streak, streakBroken, restoreStreak, playerName, isAuthed, dailyChallengeDone, completeDailyChallenge, payChips, awardXp, skillLevel } = useGame();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [notice, setNotice] = useState<string | null>(null);
@@ -164,6 +165,31 @@ export default function LearnScreen() {
         </View>
 
         <DailyGoalBar />
+
+        {/* Skill Check — placement quiz card (Fish → Pro) */}
+        <Pressable
+          style={styles.skillCard}
+          onPress={() => router.push("/assessment")}
+          testID="skill-check-card"
+        >
+          {skillLevel === null ? (
+            <>
+              <Text style={styles.skillBadge}>SKILL CHECK</Text>
+              <Text style={styles.skillTitle}>Where do you actually stand?</Text>
+              <Text style={styles.skillSub}>15 questions, 3 minutes. We place you from Fish 🐟 to Pro 🎩 — and point you at the right lessons.</Text>
+              <Text style={styles.skillCta}>Take the check ›</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.skillBadge}>YOUR LEVEL</Text>
+              <Text style={styles.skillTitle}>
+                {SKILL_TIERS[skillLevel]?.emoji} {SKILL_TIERS[skillLevel]?.name ?? "Unranked"}
+              </Text>
+              <Text style={styles.skillSub}>{SKILL_TIERS[skillLevel]?.blurb}</Text>
+              <Text style={styles.skillCta}>Retake the check ›</Text>
+            </>
+          )}
+        </Pressable>
 
         <View style={styles.hero}>
           <View style={styles.heroFelt} />
@@ -483,6 +509,40 @@ const styles = StyleSheet.create({
     fontFamily: "Outfit_600SemiBold",
     marginTop: 4,
     maxWidth: "72%",
+  },
+  skillCard: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: "rgba(67,211,124,0.35)",
+  },
+  skillBadge: {
+    fontSize: 10,
+    fontFamily: "Outfit_900Black",
+    color: colors.good,
+    letterSpacing: 1.6,
+    marginBottom: 6,
+  },
+  skillTitle: {
+    fontSize: 18,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.cream,
+    marginBottom: 4,
+  },
+  skillSub: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Outfit_500Medium",
+    color: colors.muted,
+    marginBottom: 8,
+  },
+  skillCta: {
+    fontSize: 13,
+    fontFamily: "Outfit_800ExtraBold",
+    color: colors.mint,
   },
   fan: { position: "absolute", right: 0, top: 14, width: 130, height: 110 },
   fanCard: { position: "absolute" },

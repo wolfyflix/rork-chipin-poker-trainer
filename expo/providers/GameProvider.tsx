@@ -109,6 +109,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [playerName, setPlayerName] = useState<string>("Player");
   const [playerHandle, setPlayerHandle] = useState<string>("player");
   const [playerAvatar, setPlayerAvatar] = useState<string>("🦈");
+  // Skill Check placement — 0 (Fish) to 4 (Pro). null = never taken.
+  const [skillLevel, setSkillLevelState] = useState<number | null>(null);
 
   // Daily goal tracking — Duolingo-style. Persists the date bucket and XP earned that day.
   const [dailyXp, setDailyXp] = useState<number>(0);
@@ -314,6 +316,16 @@ export const [GameProvider, useGame] = createContextHook(() => {
       } catch {
         /* ignore */
       }
+
+      // Load Skill Check placement
+      try {
+        const rawSkill = await AsyncStorage.getItem("@chipin_skill");
+        if (cancelled || !rawSkill) return;
+        const parsed = JSON.parse(rawSkill) as { level: number | null };
+        setSkillLevelState(parsed.level ?? null);
+      } catch {
+        /* ignore */
+      }
     })();
     return () => {
       cancelled = true;
@@ -339,6 +351,14 @@ export const [GameProvider, useGame] = createContextHook(() => {
       /* ignore */
     });
   }, [dailyChallengeDone]);
+
+  /** Persist the Skill Check placement (local-first — survives offline). */
+  const setSkillLevel = useCallback((level: number | null) => {
+    setSkillLevelState(level);
+    AsyncStorage.setItem("@chipin_skill", JSON.stringify({ level })).catch(() => {
+      /* ignore */
+    });
+  }, []);
 
   /** Re-check entitlement after a purchase completes (called from PaywallSheet). */
   const refreshProStatus = useCallback(async () => {
@@ -625,6 +645,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
       setPlayerHandle,
       playerAvatar,
       setPlayerAvatar,
+      skillLevel,
+      setSkillLevel,
       isAuthed,
       usesLeft,
       biggestPot,
@@ -682,6 +704,6 @@ export const [GameProvider, useGame] = createContextHook(() => {
       toggleHardMode,
       refreshProStatus,
     }),
-    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, dailyChallengeDone, friends, pendingInvites, tableConfig, invitedToTable, sessionId, activeSession, presenceList, hostSession, joinSession, subscribeSession, trackPresenceSession, broadcastState, leaveSession, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus, completeDailyChallenge],
+    [chips, streak, streakBroken, streakRecoveredToday, completed, pro, playerName, playerHandle, playerAvatar, skillLevel, setSkillLevel, isAuthed, usesLeft, biggestPot, highs, hardMode, dailyClaimed, delta, lives, nextLifeAt, tableUnlocked, paywallVisible, paywallMessage, dailyXp, dailyGoalMet, dailyChallengeDone, friends, pendingInvites, tableConfig, invitedToTable, sessionId, activeSession, presenceList, hostSession, joinSession, subscribeSession, trackPresenceSession, broadcastState, leaveSession, addFriend, removeFriend, sendFriendRequest, acceptFriendRequest, declineFriendRequest, startTableGame, clearTableGame, toggleInviteFriend, payChips, completeLesson, awardXp, recordHigh, chargeToolUse, claimDailyDrop, openPaywall, closePaywall, loseLife, addLife, refillAllLives, recordBiggestPot, breakStreak, restoreStreak, toggleHardMode, refreshProStatus, completeDailyChallenge],
   );
 });
